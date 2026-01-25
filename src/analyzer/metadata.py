@@ -1,0 +1,1 @@
+# EXIF (Exchangeable Image File Format) data check
