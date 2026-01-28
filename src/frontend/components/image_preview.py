@@ -14,7 +14,7 @@ def preview_image(image, caption="Uploaded Image"):
         st.image(
             image,
             caption=caption,
-            use_column_width=True
+            width=600  # Fixed: specify pixel width or use 'stretch'
         )
     
     with col2:
