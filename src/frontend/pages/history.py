@@ -1,4 +1,4 @@
-"""
+""" 
 History page for TruthLens dashboard.
 This appears as "History" in Streamlit's sidebar.
 """

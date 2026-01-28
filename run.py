@@ -1,4 +1,4 @@
-""" 
+"""  
 TruthLens Dashboard Runner
 """
 
