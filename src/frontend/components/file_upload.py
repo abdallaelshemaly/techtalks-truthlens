@@ -1,6 +1,6 @@
 """
 File upload component for TruthLens dashboard.
-"""
+"""  
 
 import streamlit as st
 from PIL import Image
