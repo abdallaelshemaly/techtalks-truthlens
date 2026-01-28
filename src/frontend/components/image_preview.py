@@ -1,4 +1,4 @@
-"""
+""" 
 Image preview component for TruthLens dashboard.
 """
 

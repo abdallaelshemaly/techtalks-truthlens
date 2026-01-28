@@ -1,4 +1,4 @@
-""" 
+"""  
 TruthLens - Main Streamlit Application
 Home page for the TruthLens dashboard.
 """
