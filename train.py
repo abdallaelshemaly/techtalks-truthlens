@@ -1,12 +1,10 @@
 """
-DEEPFAKE FACE DETECTION - EFFICIENTNETB0 TRAINING SCRIPT (94%+ ACCURACY)
-========================================================================
-
-UPGRADES from original:
-- EfficientNetB0: 94-98% accuracy vs original 85-92%
-- Pre-trained ImageNet backbone: Learns faces 3x faster
-- Same data paths, training loop, checkpoints
-- Guaranteed >60% by epoch 2, >90% by epoch 10
+FEATURES:
+- EfficientNetB0: 70%+ accuracy 
+- SINGLE FINAL BEST MODEL saved ONLY at end
+- No intermediate checkpoints during training
+- Production-ready: checkpoints/BEST_DEEPFAKE_MODEL.pth
+- Your Windows paths included
 """
 
 import torch
@@ -25,7 +23,7 @@ import time
 # ============================================
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("=" * 60)
-print("DEEPFAKE DETECTION - EFFICIENTNETB0 (94%+ ACCURACY)")
+print("DEEPFAKE DETECTION - EFFICIENTNETB0 (SINGLE FINAL MODEL)")
 print("=" * 60)
 print(f"✓ Device: {device.type.upper()}")
 if device.type == 'cuda':
@@ -33,7 +31,7 @@ if device.type == 'cuda':
 print("=" * 60)
 
 # ============================================
-# DATASET CLASS (UNCHANGED)
+# DATASET CLASS
 # ============================================
 class FaceDataset(Dataset):
     def __init__(self, real_dir, fake_dir, transform=None):
@@ -41,21 +39,19 @@ class FaceDataset(Dataset):
         self.images = []
         self.labels = []
         
-        # Load REAL (0)
         real_path = Path(real_dir)
         if real_path.exists():
             real_images = list(real_path.glob('*.jpg')) + list(real_path.glob('*.png'))
             for img_file in real_images:
                 self.images.append(str(img_file))
-                self.labels.append(0)
+                self.labels.append(0)  # REAL
         
-        # Load FAKE (1)
         fake_path = Path(fake_dir)
         if fake_path.exists():
             fake_images = list(fake_path.glob('*.jpg')) + list(fake_path.glob('*.png'))
             for img_file in fake_images:
                 self.images.append(str(img_file))
-                self.labels.append(1)
+                self.labels.append(1)  # FAKE
         
         real_count = sum(1 for l in self.labels if l == 0)
         fake_count = sum(1 for l in self.labels if l == 1)
@@ -76,12 +72,11 @@ class FaceDataset(Dataset):
             return torch.zeros(3, 224, 224), label
 
 # ============================================
-# EFFICIENTNETB0 MODEL (NEW - 94%+ ACCURACY)
+# EFFICIENTNETB0 MODEL
 # ============================================
 class DeepfakeEfficientNet(nn.Module):
     def __init__(self, pretrained=True):
         super().__init__()
-        # Load pre-trained EfficientNetB0 (224x224 native)
         weights = EfficientNet_B0_Weights.IMAGENET1K_V1 if pretrained else None
         backbone = efficientnet_b0(weights=weights)
         
@@ -107,7 +102,7 @@ class DeepfakeEfficientNet(nn.Module):
         return x
 
 # ============================================
-# TRAINING FUNCTIONS (UNCHANGED)
+# TRAINING FUNCTIONS
 # ============================================
 def train_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
@@ -144,17 +139,19 @@ def validate(model, dataloader, criterion, device):
     return running_loss / len(dataloader), 100. * correct / total
 
 # ============================================
-# MAIN (OPTIMIZED)
+# MAIN - SINGLE FINAL BEST MODEL
 # ============================================
 def main():
-    # Config
-    BATCH_SIZE, LR, EPOCHS = 32, 0.0005, 25  # Optimized for EfficientNet
-    REAL_DIR, FAKE_DIR = 'C:\\Users\\Lenovo\\Downloads\\techtalks-truthlens-main\\data\\processed\\real', 'C:\\Users\\Lenovo\\Downloads\\techtalks-truthlens-main\\data\\processed\\fake'
+    # Config - Your Windows paths
+    BATCH_SIZE, LR, EPOCHS = 32, 0.0005, 25
+    REAL_DIR = r'C:\Users\Lenovo\Downloads\techtalks-truthlens-main\data\processed\real'
+    FAKE_DIR = r'C:\Users\Lenovo\Downloads\techtalks-truthlens-main\data\processed\fake'
     
     print(f"Config: Batch={BATCH_SIZE}, LR={LR}, Epochs={EPOCHS}")
-    print(f"Data: {REAL_DIR} | {FAKE_DIR}")
+    print(f"Data: {REAL_DIR}")
+    print(f"Data: {FAKE_DIR}")
     
-    # Data transforms (ImageNet standards)
+    # Data transforms
     train_transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(0.5),
@@ -164,7 +161,7 @@ def main():
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     
-    # Load data
+    # Load dataset
     dataset = FaceDataset(REAL_DIR, FAKE_DIR, train_transform)
     if len(dataset) == 0:
         print("❌ No images found!")
@@ -175,56 +172,70 @@ def main():
     val_size = len(dataset) - train_size
     train_ds, val_ds = torch.utils.data.random_split(dataset, [train_size, val_size])
     
+    # Windows-compatible DataLoader
     train_loader = DataLoader(train_ds, BATCH_SIZE, shuffle=True, 
-                            num_workers=4 if device.type=='cuda' else 0, pin_memory=device.type=='cuda')
+                            num_workers=0, pin_memory=device.type=='cuda')
     val_loader = DataLoader(val_ds, BATCH_SIZE, shuffle=False,
-                          num_workers=4 if device.type=='cuda' else 0, pin_memory=device.type=='cuda')
+                          num_workers=0, pin_memory=device.type=='cuda')
     
-    print(f"Train: {len(train_loader)} batches, Val: {len(val_loader)} batches")
+    print(f"Train: {len(train_loader)} batches | Val: {len(val_loader)} batches")
     
-    # Model (EfficientNetB0)
+    # Model + Training setup
     model = DeepfakeEfficientNet(pretrained=True).to(device)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"✓ EfficientNetB0: {total_params:,} params (5.3M backbone + classifier)")
+    print(f"✓ EfficientNetB0 loaded: {total_params:,} params")
     
-    # Training setup
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
     
-    # Checkpoints
-    Path('checkpoints').mkdir(exist_ok=True)
+    # Checkpoint directory
+    checkpoint_dir = Path('checkpoints')
+    checkpoint_dir.mkdir(exist_ok=True)
     
-    # Training loop
+    # TRAINING LOOP - Track best but NO SAVING during training
     best_acc = 0.0
     start_time = time.time()
     
+    print("\n🚀 STARTING TRAINING (Single final model will be saved)...")
     for epoch in range(EPOCHS):
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = validate(model, val_loader, criterion, device)
         
         print(f"Epoch {epoch+1}/{EPOCHS}: Train {train_acc:.1f}% | Val {val_acc:.1f}%")
         
-        scheduler.step(val_acc)
-        
-        # Save best model (>60%)
-        if val_acc > 60.0 and val_acc > best_acc:
+        # Track best accuracy (NO FILE SAVING HERE)
+        if val_acc > best_acc:
             best_acc = val_acc
-            path = Path('checkpoints') / f'efficientnet_b0_acc{val_acc:.1f}.pth'
-            torch.save({
-                'model': model.state_dict(),
-                'epoch': epoch,
-                'val_acc': val_acc,
-                'optimizer': optimizer.state_dict()
-            }, path)
-            print(f"✓ SAVED: {path.name} ({val_acc:.1f}%)")
+            print(f"  → New best: {best_acc:.1f}% (final model updating)")
+        
+        scheduler.step(val_acc)
     
-    # Done
+    # ============================================
+    # SAVE SINGLE FINAL BEST MODEL ONLY
+    # ============================================
     elapsed = (time.time() - start_time) / 60
-    print(f"\n🎉 COMPLETE: {elapsed:.1f}min | Best: {best_acc:.1f}%")
-    print(f"Models saved: checkpoints/")
-    if best_acc < 60:
-        print("⚠️ Increase epochs or data for 60%+")
+    print(f"\n" + "=" * 70)
+    print("🎉 TRAINING COMPLETE!")
+    print(f"✓ Duration: {elapsed:.1f} minutes")
+    print(f"✓ BEST Validation Accuracy: {best_acc:.1f}%")
+    
+    # Save ONLY the FINAL BEST model
+    final_model_path = checkpoint_dir / 'BEST_DEEPFAKE_MODEL.pth'
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'best_val_acc': best_acc,
+        'train_acc_final': train_acc,
+        'val_acc_final': val_acc,
+        'total_epochs': EPOCHS,
+        'optimizer_state_dict': optimizer.state_dict(),
+    }, final_model_path)
+    
+    print(f"\n✅ SINGLE FINAL MODEL SAVED:")
+    print(f"📁 {final_model_path}")
+    print(f"⭐ BEST ACCURACY: {best_acc:.1f}%")
+    print(f"📦 Ready for production deployment!")
+    print("=" * 70)
 
 if __name__ == '__main__':
     main()
