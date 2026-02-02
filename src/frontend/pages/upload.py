@@ -23,6 +23,76 @@ render_header("📤 Upload Image for Analysis")
 # Information box
 st.info("📋 Supported formats: JPG, PNG, JPEG | Max size: 10MB")
 
+def show_analysis_results():
+    """Display mock analysis results."""
+    
+    st.success("✅ Image uploaded successfully! Analysis complete.")
+    
+    # Results section
+    st.markdown("### 📊 Analysis Results")
+    
+    # Metrics in columns
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Risk Score", "32%", "-12%")
+        st.progress(0.32)
+    
+    with col2:
+        st.metric("Authenticity", "68%", "+8%")
+        st.progress(0.68)
+    
+    with col3:
+        st.metric("Confidence", "85%", "High")
+        st.progress(0.85)
+    
+    with col4:
+        st.metric("Processing Time", "2.1s", "Fast")
+    
+    # Detailed findings
+    st.markdown("### 🔍 Detailed Findings")
+    
+    with st.expander("View Detailed Analysis", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**✅ No Major Issues Found:**")
+            st.write("- No obvious visual artifacts detected")
+            st.write("- Metadata appears consistent")
+            st.write("- Compression patterns look normal")
+        
+        with col2:
+            st.markdown("**⚠️ Minor Concerns:**")
+            st.write("- Slight JPEG compression artifacts")
+            st.write("- Minor color inconsistencies in shadows")
+            st.write("- Edge smoothness slightly above average")
+    
+    # Recommendations
+    st.markdown("### 📋 Recommendations")
+    st.info("""
+    1. **Verify Source:** Check the original source of this image
+    2. **Cross-reference:** Compare with other available sources
+    3. **Context Check:** Consider the context in which this image is used
+    4. **Expert Review:** For critical decisions, consult a human expert
+    """)
+    
+    # Action buttons
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📄 Generate Report", use_container_width=True):
+            st.info("Report generation will be implemented in Phase 2")
+    
+    with col2:
+        if st.button("💾 Save Results", use_container_width=True):
+            st.success("Results saved to history!")
+            st.switch_page("pages/history.py")
+    
+    with col3:
+        if st.button("🔄 New Analysis", use_container_width=True):
+            st.rerun()
+
 # Upload section
 st.markdown("### Upload Your Image")
 
@@ -98,76 +168,6 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error loading image: {str(e)}")
         st.info("Please try uploading a different image file.")
-
-def show_analysis_results():
-    """Display mock analysis results."""
-    
-    st.success("✅ Image uploaded successfully! Analysis complete.")
-    
-    # Results section
-    st.markdown("### 📊 Analysis Results")
-    
-    # Metrics in columns
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Risk Score", "32%", "-12%")
-        st.progress(0.32)
-    
-    with col2:
-        st.metric("Authenticity", "68%", "+8%")
-        st.progress(0.68)
-    
-    with col3:
-        st.metric("Confidence", "85%", "High")
-        st.progress(0.85)
-    
-    with col4:
-        st.metric("Processing Time", "2.1s", "Fast")
-    
-    # Detailed findings
-    st.markdown("### 🔍 Detailed Findings")
-    
-    with st.expander("View Detailed Analysis", expanded=False):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**✅ No Major Issues Found:**")
-            st.write("- No obvious visual artifacts detected")
-            st.write("- Metadata appears consistent")
-            st.write("- Compression patterns look normal")
-        
-        with col2:
-            st.markdown("**⚠️ Minor Concerns:**")
-            st.write("- Slight JPEG compression artifacts")
-            st.write("- Minor color inconsistencies in shadows")
-            st.write("- Edge smoothness slightly above average")
-    
-    # Recommendations
-    st.markdown("### 📋 Recommendations")
-    st.info("""
-    1. **Verify Source:** Check the original source of this image
-    2. **Cross-reference:** Compare with other available sources
-    3. **Context Check:** Consider the context in which this image is used
-    4. **Expert Review:** For critical decisions, consult a human expert
-    """)
-    
-    # Action buttons
-    st.markdown("---")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📄 Generate Report", use_container_width=True):
-            st.info("Report generation will be implemented in Phase 2")
-    
-    with col2:
-        if st.button("💾 Save Results", use_container_width=True):
-            st.success("Results saved to history!")
-            st.switch_page("pages/history.py")
-    
-    with col3:
-        if st.button("🔄 New Analysis", use_container_width=True):
-            st.rerun()
 
 # Sidebar content for this page
 with st.sidebar:
