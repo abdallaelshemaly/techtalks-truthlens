@@ -55,8 +55,8 @@ def get_dataset_statistics():
     """
     real_processed = len(list(Path("data/processed/real").glob("*.*")))
     fake_processed = len(list(Path("data/processed/fake").glob("*.*")))
-    real_raw = len(list(Path("data/real").glob("*.*")))
-    fake_raw = len(list(Path("data/fake").glob("*.*")))
+    real_raw = len(list(Path("data/raw/real").glob("*.*")))
+    fake_raw = len(list(Path("data/raw/fake").glob("*.*")))
 
     return {
         "raw": {"real": real_raw, "fake": fake_raw, "total": real_raw + fake_raw},
