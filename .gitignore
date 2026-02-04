@@ -31,3 +31,5 @@ Thumbs.db
 
 # Streamlit
 .streamlit/
+truthlens.db
+uploads/
