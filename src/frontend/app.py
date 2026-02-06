@@ -15,8 +15,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        'Get Help': 'https://github.com/your-repo/truthlens',
-        'Report a bug': 'https://github.com/your-repo/truthlens/issues',
+        'Get Help': 'https://github.com/abdallaelshemaly/techtalks-truthlens',
+        'Report a bug': 'https://github.com/abdallaelshemaly/techtalks-truthlens/issues',
         'About': '''
         # TruthLens v1.0.0
         
@@ -72,12 +72,12 @@ if page == "🏠 Home":
         
         st.warning("This is an MVP version. Advanced features are under development.")
 
-    with col2:
-        st.image(
-            "https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=400",
-            caption="Digital Verification",
-            use_container_width=True
-        )
+    # with col2:
+    #     st.image(
+    #         "https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=400",
+    #         caption="Digital Verification",
+    #         use_container_width=True
+    #     )
 
     # Quick actions
     st.markdown("---")
