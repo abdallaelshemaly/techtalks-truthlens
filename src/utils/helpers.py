@@ -1,3 +1,5 @@
+from pathlib import Path
+
 def check_dependencies():
     """
     Check if all required dependencies are available.
@@ -47,6 +49,13 @@ def check_dependencies():
         pass
 
     return dependencies
+
+
+def get_test_images(category):
+    """
+    Get test images for a given category (real or fake).
+    """
+    return list(Path(f"data/test/{category}").glob("*.*"))
 
 
 def get_dataset_statistics():
