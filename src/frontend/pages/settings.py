@@ -235,7 +235,7 @@ with st.sidebar:
     
     st.markdown("---")
     if st.button("📤 Go to Upload"):
-        st.switch_page("pages/upload.py")
+        st.switch_page("pages/upload_analyze.py") 
     
     if st.button("🏠 Back to Home"):
         st.switch_page("app.py")

@@ -28,13 +28,11 @@ class TruthLensAPIClient:
         try:
             # Prepare the request
             files = {'file': (image_file.name, image_file.getvalue(), image_file.type)}
-            data = {'analysis_type': analysis_type}
             
             # Make the request
             response = requests.post(
-                f"{self.base_url}/api/analyze",
+                f"{self.base_url}/api/analyze/complete",
                 files=files,
-                data=data,
                 timeout=self.timeout
             )
             
