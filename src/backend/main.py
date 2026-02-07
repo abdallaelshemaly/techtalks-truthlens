@@ -1,5 +1,5 @@
 """
-FastAPI Backend for TruthLens
+FastAPI Backend for TruthLens with enhanced report generation
 """
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
@@ -30,6 +30,15 @@ try:
 except ImportError:
     print("⚠️  Forensics module not available")
     FORENSICS_AVAILABLE = False
+
+# Try to import advanced report generator
+try:
+    from src.advanced.report_generator import TruthLensReportGenerator
+    REPORT_GEN_AVAILABLE = True
+    print("✅ Advanced report generator available")
+except ImportError:
+    REPORT_GEN_AVAILABLE = False
+    print("⚠️  Advanced report generator not available")
 
 app = FastAPI(title="TruthLens API", description="Deepfake Detection System")
 
@@ -166,7 +175,7 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-# ---------- Upload Endpoint (Keep existing) ----------
+# ---------- Upload Endpoint ----------
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
     """Simple upload endpoint - saves file and returns ID."""
@@ -208,10 +217,10 @@ async def upload_image(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
-# ---------- Complete Analysis (NEW - Most Important) ----------
+# ---------- Complete Analysis ----------
 @app.post("/api/analyze/complete")
 async def analyze_complete(file: UploadFile = File(...)):
-    """Complete analysis: CNN + Forensics + Database"""
+    """Complete analysis: CNN + Forensics + Database + Enhanced Reports"""
     try:
         print(f"📤 Received file: {file.filename}")
         
@@ -227,6 +236,7 @@ async def analyze_complete(file: UploadFile = File(...)):
         print(f"✅ File saved: {file_path}")
         
         # 2. CNN Prediction
+        start_time = datetime.now()
         if CNN_AVAILABLE:
             try:
                 cnn_prediction, cnn_confidence = predict_image(file_path)
@@ -267,6 +277,8 @@ async def analyze_complete(file: UploadFile = File(...)):
             print("⚠️  Using dummy forensic data")
         
         # 4. Calculate Overall Risk
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
         if is_fake:
             overall_risk = (forensic_combined * 0.5) + (cnn_confidence * 0.5)
         else:
@@ -293,24 +305,67 @@ async def analyze_complete(file: UploadFile = File(...)):
             "copy_move_score": round(copy_move_score, 2),
             "risk_level": risk_level,
             "report_path": "",
-            "file_path": file_path
+            "file_path": file_path,
+            "processing_time": round(processing_time, 2)
         }
         
         # 7. Save to Database
         analysis_id = log_analysis(analysis_data)
         print(f"💾 Saved to DB with ID: {analysis_id}")
         
-        # 8. Generate Report
-        report_path = generate_report(analysis_data, analysis_id)
+        # 8. Generate Enhanced Reports
+        report_path = ""
+        report_url = ""
+        
+        if REPORT_GEN_AVAILABLE:
+            try:
+                # Add analysis_id to data
+                analysis_data["id"] = analysis_id
+                analysis_data["analysis_id"] = f"report_{analysis_id}_{file_timestamp}"
+                analysis_data["timestamp"] = datetime.now().isoformat()
+                
+                # Generate enhanced reports
+                generator = TruthLensReportGenerator(REPORTS_DIR)
+                reports = generator.generate_backend_report(analysis_data, "html")
+                
+                if "html" in reports:
+                    report_path = reports["html"]
+                    report_filename = os.path.basename(report_path)
+                    report_url = f"/reports/{report_filename}"
+                    print(f"📄 Enhanced HTML report generated: {report_path}")
+                else:
+                    # Fallback to simple report
+                    report_path = generate_simple_report(analysis_data, analysis_id)
+                    report_url = f"/reports/{os.path.basename(report_path)}"
+                    
+            except Exception as e:
+                print(f"⚠️  Enhanced report failed: {e}")
+                # Fallback to simple report
+                report_path = generate_simple_report(analysis_data, analysis_id)
+                report_url = f"/reports/{os.path.basename(report_path)}"
+        else:
+            # Generate simple report
+            report_path = generate_simple_report(analysis_data, analysis_id)
+            report_url = f"/reports/{os.path.basename(report_path)}"
+        
+        # Update analysis data with report path
         analysis_data["report_path"] = report_path
         
-        # 9. Prepare Response
+        # 9. Check for ELA image
+        ela_image_url = None
+        ela_image_name = f"ela_{filename}"
+        ela_image_path = os.path.join(ELA_DIR, ela_image_name)
+        if os.path.exists(ela_image_path):
+            ela_image_url = f"/uploads/ela_samples/{ela_image_name}"
+        
+        # 10. Prepare Response
         response_data = {
             "status": "success",
             "id": analysis_id,
             "result": analysis_data,
-            "ela_image_url": f"/uploads/ela_samples/ela_{filename}" if os.path.exists(f"{ELA_DIR}/ela_{filename}") else None,
-            "report_url": f"/reports/{os.path.basename(report_path)}" if report_path else None
+            "ela_image_url": ela_image_url,
+            "report_url": report_url,
+            "processing_time": round(processing_time, 2)
         }
         
         return JSONResponse(content=response_data)
@@ -407,9 +462,50 @@ async def fetch_history(limit: int = 20):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ---------- Stats Endpoint ----------
+@app.get("/api/stats")
+async def get_stats():
+    """Get system statistics"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Total analyses
+        cursor.execute("SELECT COUNT(*) FROM analyses")
+        total = cursor.fetchone()[0]
+        
+        # Fake vs Real
+        cursor.execute("SELECT COUNT(*) FROM analyses WHERE is_fake = 1")
+        fake_count = cursor.fetchone()[0]
+        
+        # Average scores
+        cursor.execute("SELECT AVG(cnn_confidence), AVG(ela_score) FROM analyses")
+        avg_cnn, avg_ela = cursor.fetchone()
+        
+        # Recent analyses
+        cursor.execute("SELECT filename, risk_level, timestamp FROM analyses ORDER BY timestamp DESC LIMIT 5")
+        recent = cursor.fetchall()
+        
+        conn.close()
+        
+        return {
+            "total_analyses": total,
+            "fake_count": fake_count,
+            "real_count": total - fake_count,
+            "avg_cnn_confidence": round(avg_cnn or 0, 2),
+            "avg_ela_score": round(avg_ela or 0, 2),
+            "recent_analyses": [
+                {"filename": r[0], "risk_level": r[1], "timestamp": r[2]} 
+                for r in recent
+            ]
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ---------- Report Generation ----------
-def generate_report(analysis_data, analysis_id):
-    """Generate a simple text report"""
+def generate_simple_report(analysis_data, analysis_id):
+    """Generate a simple text report (fallback)"""
     try:
         report_filename = f"report_{analysis_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         report_path = os.path.join(REPORTS_DIR, report_filename)
@@ -462,14 +558,18 @@ def generate_report(analysis_data, analysis_id):
             f.write("End of Report\n")
             f.write("=" * 60 + "\n")
         
-        print(f"📄 Report generated: {report_path}")
+        print(f"📄 Simple report generated: {report_path}")
         return report_path
         
     except Exception as e:
-        print(f"⚠️  Report generation failed: {e}")
+        print(f"⚠️  Simple report generation failed: {e}")
         return ""
 
 # ---------- Run Server ----------
 if __name__ == "__main__":
     import uvicorn
+    print("🚀 Starting TruthLens Backend with enhanced features...")
+    print(f"   - CNN Available: {CNN_AVAILABLE}")
+    print(f"   - Forensics Available: {FORENSICS_AVAILABLE}")
+    print(f"   - Advanced Reports: {REPORT_GEN_AVAILABLE}")
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
