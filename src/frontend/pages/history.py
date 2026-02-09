@@ -326,3 +326,80 @@ st.markdown("""
     <p>Data is stored locally in <code>truthlens.db</code> file</p>
 </div>
 """, unsafe_allow_html=True)
+
+# Add this function near other helper functions
+def export_history_to_csv(history_data, filename="truthlens_history_export.csv"):
+    """Export history data to CSV"""
+    if not history_data:
+        return None
+    
+    # Prepare data for CSV
+    rows = []
+    for item in history_data:
+        rows.append({
+            'ID': item.get('id', ''),
+            'Filename': item.get('filename', 'Unknown'),
+            'Timestamp': item.get('timestamp', ''),
+            'Is_Fake': 'Yes' if item.get('is_fake') else 'No',
+            'CNN_Confidence': item.get('cnn_confidence', 0),
+            'ELA_Score': item.get('ela_score', 0),
+            'ELA_Enhanced_Score': item.get('ela_enhanced_score', item.get('ela_score', 0)),
+            'Metadata_Score': item.get('metadata_score', 0),
+            'Copy_Move_Score': item.get('copy_move_score', 0),
+            'Copy_Move_Enhanced_Score': item.get('copy_move_enhanced_score', item.get('copy_move_score', 0)),
+            'Risk_Level': item.get('risk_level', 'UNKNOWN'),
+            'Enhanced_Risk_Level': item.get('enhanced_risk_level', item.get('risk_level', 'UNKNOWN'))
+        })
+    
+    # Create DataFrame and CSV
+    import pandas as pd
+    from datetime import datetime
+    df = pd.DataFrame(rows)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"truthlens_history_export_{timestamp}.csv"
+    
+    return df.to_csv(index=False), filename
+
+# Update the export section in history.py (around line 200):
+st.markdown("### 📥 Export Data")
+
+col_exp1, col_exp2, col_exp3 = st.columns(3)  # Changed to 3 columns
+
+with col_exp1:
+    if st.button("📋 Copy to Clipboard", use_container_width=True):
+        csv_data = df.to_csv(index=False)
+        st.code(csv_data[:500] + "..." if len(csv_data) > 500 else csv_data, language="text")
+        st.success("CSV data ready to copy!")
+
+with col_exp2:
+    # Existing CSV download
+    csv = df.to_csv(index=False)
+    st.download_button(
+        label="💾 Download CSV",
+        data=csv,
+        file_name=f"truthlens_history_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+with col_exp3:
+    # NEW: Export full history button
+    if st.button("📊 Export Full History", use_container_width=True):
+        with st.spinner("Exporting full history..."):
+            # Get ALL history (not just filtered)
+            full_history = load_history_data(limit=1000)  # Increased limit
+            csv_data, filename = export_history_to_csv(full_history)
+            
+            if csv_data:
+                st.download_button(
+                    label="⬇️ Download Full History",
+                    data=csv_data,
+                    file_name=filename,
+                    mime="text/csv",
+                    key="full_history_download",
+                    use_container_width=True
+                )
+            else:
+                st.warning("No history data to export")
