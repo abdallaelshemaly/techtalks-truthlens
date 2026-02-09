@@ -79,7 +79,8 @@ def load_history_data(limit=50):
         if response and "history" in response:
             return response["history"]
         return []
-    except:
+    except Exception as e:
+        st.error(f"Error loading history: {str(e)}")
         return []
 
 # Sidebar filters
@@ -129,79 +130,94 @@ with st.sidebar:
 # Load data
 history_data = load_history_data(limit=100)
 
-if history_data:
-    # Convert to DataFrame
-    df_data = []
-    for item in history_data:
-        # Format risk badge
-        risk_level = item.get("risk_level", "UNKNOWN")
-        if risk_level == "HIGH":
-            risk_badge = '<span class="risk-badge risk-high">HIGH</span>'
-        elif risk_level == "MEDIUM":
-            risk_badge = '<span class="risk-badge risk-medium">MEDIUM</span>'
-        else:
-            risk_badge = '<span class="risk-badge risk-low">LOW</span>'
-        
-        # Format timestamp
-        timestamp = item.get("timestamp", "")
-        if timestamp:
-            try:
-                date_only = timestamp.split("T")[0]
-                time_only = timestamp.split("T")[1][:8]
-                formatted_time = f"{date_only} {time_only}"
-            except:
-                formatted_time = timestamp
-        else:
-            formatted_time = "N/A"
-        
-        df_data.append({
-            "ID": item.get("id", ""),
-            "Filename": item.get("filename", "Unknown"),
-            "Date": formatted_time,
-            "Risk": risk_badge,
-            "CNN %": float(item.get("cnn_confidence", 0)),
-            "ELA %": float(item.get("ela_score", 0)),
-            "Meta %": float(item.get("metadata_score", 0)),
-            "CM %": float(item.get("copy_move_score", 0)),
-            "Is Fake": "✅" if item.get("is_fake") else "❌",
-            "Risk Level": risk_level  # Hidden column for filtering
-        })
+if not history_data:
+    st.info("📭 No analysis history found in the database.")
+    st.markdown("""
+    To get started:
+    1. Go to the **Upload & Analyze** page
+    2. Upload an image for analysis
+    3. Your first analysis will appear here!
+    """)
     
-    df = pd.DataFrame(df_data)
+    if st.button("📤 Go to Upload Page", type="primary"):
+        st.switch_page("pages/upload_analyze.py")
     
-    # Apply filters
-    if risk_filter:
-        df = df[df["Risk Level"].isin(risk_filter)]
+    # Early return to avoid errors
+    st.stop()
+
+# Convert to DataFrame
+df_data = []
+for item in history_data:
+    # Format risk badge
+    risk_level = item.get("risk_level", "UNKNOWN")
+    if risk_level == "HIGH":
+        risk_badge = '<span class="risk-badge risk-high">HIGH</span>'
+    elif risk_level == "MEDIUM":
+        risk_badge = '<span class="risk-badge risk-medium">MEDIUM</span>'
+    else:
+        risk_badge = '<span class="risk-badge risk-low">LOW</span>'
     
-    if authenticity_filter == "Fake Only":
-        df = df[df["Is Fake"] == "✅"]
-    elif authenticity_filter == "Real Only":
-        df = df[df["Is Fake"] == "❌"]
+    # Format timestamp
+    timestamp = item.get("timestamp", "")
+    if timestamp:
+        try:
+            date_only = timestamp.split("T")[0]
+            time_only = timestamp.split("T")[1][:8]
+            formatted_time = f"{date_only} {time_only}"
+        except:
+            formatted_time = timestamp
+    else:
+        formatted_time = "N/A"
     
-    if confidence_threshold > 0:
-        df = df[df["CNN %"] >= confidence_threshold]
-    
-    # Display summary stats
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Analyses", len(df))
-    with col2:
-        high_count = len(df[df["Risk Level"] == "HIGH"])
-        st.metric("High Risk", high_count)
-    with col3:
-        fake_count = len(df[df["Is Fake"] == "✅"])
-        st.metric("Fake Detected", fake_count)
-    with col4:
-        avg_cnn = df["CNN %"].mean() if len(df) > 0 else 0
-        st.metric("Avg CNN %", f"{avg_cnn:.1f}")
-    
-    # Display the table
-    st.markdown(f"### Showing {len(df)} of {len(history_data)} analyses")
-    
-    # Create display DataFrame (without hidden columns)
-    display_df = df.drop(columns=["Risk Level", "ID"]).copy()
-    
-    # Display as interactive table
+    df_data.append({
+        "ID": item.get("id", ""),
+        "Filename": item.get("filename", "Unknown"),
+        "Date": formatted_time,
+        "Risk": risk_badge,
+        "CNN %": float(item.get("cnn_confidence", 0)),
+        "ELA %": float(item.get("ela_score", 0)),
+        "Meta %": float(item.get("metadata_score", 0)),
+        "CM %": float(item.get("copy_move_score", 0)),
+        "Is Fake": "✅" if item.get("is_fake") else "❌",
+        "Risk Level": risk_level  # Hidden column for filtering
+    })
+
+df = pd.DataFrame(df_data)
+
+# Apply filters
+if risk_filter:
+    df = df[df["Risk Level"].isin(risk_filter)]
+
+if authenticity_filter == "Fake Only":
+    df = df[df["Is Fake"] == "✅"]
+elif authenticity_filter == "Real Only":
+    df = df[df["Is Fake"] == "❌"]
+
+if confidence_threshold > 0:
+    df = df[df["CNN %"] >= confidence_threshold]
+
+# Display summary stats
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Analyses", len(df))
+with col2:
+    high_count = len(df[df["Risk Level"] == "HIGH"])
+    st.metric("High Risk", high_count)
+with col3:
+    fake_count = len(df[df["Is Fake"] == "✅"])
+    st.metric("Fake Detected", fake_count)
+with col4:
+    avg_cnn = df["CNN %"].mean() if len(df) > 0 else 0
+    st.metric("Avg CNN %", f"{avg_cnn:.1f}")
+
+# Display the table
+st.markdown(f"### Showing {len(df)} of {len(history_data)} analyses")
+
+# Create display DataFrame (without hidden columns)
+display_df = df.drop(columns=["Risk Level", "ID"]).copy()
+
+# Display as interactive table
+if len(display_df) > 0:
     st.dataframe(
         display_df,
         column_config={
@@ -257,17 +273,19 @@ if history_data:
         hide_index=True,
         use_container_width=True
     )
-    
-    # Export options
-    st.markdown("---")
-    st.markdown("### 📥 Export Data")
-    
+else:
+    st.info("No analyses match your filters. Try adjusting filter settings.")
+
+# Export options
+st.markdown("---")
+st.markdown("### 📥 Export Data")
+
+if len(df) > 0:  # Only show export if we have data
     col_exp1, col_exp2 = st.columns(2)
     
     with col_exp1:
+        csv_data = df.to_csv(index=False)
         if st.button("📋 Copy to Clipboard", use_container_width=True):
-            # Convert to CSV string
-            csv_data = df.to_csv(index=False)
             st.code(csv_data[:500] + "..." if len(csv_data) > 500 else csv_data, language="text")
             st.success("CSV data ready to copy!")
     
@@ -305,33 +323,14 @@ if history_data:
                 st.line_chart(forensic_df)
             else:
                 st.info("Need more data for trend analysis")
-    
 else:
-    st.info("📭 No analysis history found in the database.")
-    st.markdown("""
-    To get started:
-    1. Go to the **Upload & Analyze** page
-    2. Upload an image for analysis
-    3. Your first analysis will appear here!
-    """)
-    
-    if st.button("📤 Go to Upload Page", type="primary"):
-        st.switch_page("pages/upload_analyze.py")
+    st.info("No data available for export")
 
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; font-size: 0.9rem;">
-    <p>📜 TruthLens Analysis History | Database records from local SQLite</p>
-    <p>Data is stored locally in <code>truthlens.db</code> file</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Add this function near other helper functions
+# Export full history function
 def export_history_to_csv(history_data, filename="truthlens_history_export.csv"):
     """Export history data to CSV"""
     if not history_data:
-        return None
+        return None, filename
     
     # Prepare data for CSV
     rows = []
@@ -352,45 +351,21 @@ def export_history_to_csv(history_data, filename="truthlens_history_export.csv")
         })
     
     # Create DataFrame and CSV
-    import pandas as pd
-    from datetime import datetime
-    df = pd.DataFrame(rows)
+    df_full = pd.DataFrame(rows)
     
     # Generate filename with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f"truthlens_history_export_{timestamp}.csv"
     
-    return df.to_csv(index=False), filename
+    return df_full.to_csv(index=False), filename
 
-# Update the export section in history.py (around line 200):
-st.markdown("### 📥 Export Data")
+# NEW: Export full history button
+st.markdown("### 📊 Export Full History")
 
-col_exp1, col_exp2, col_exp3 = st.columns(3)  # Changed to 3 columns
-
-with col_exp1:
-    if st.button("📋 Copy to Clipboard", use_container_width=True):
-        csv_data = df.to_csv(index=False)
-        st.code(csv_data[:500] + "..." if len(csv_data) > 500 else csv_data, language="text")
-        st.success("CSV data ready to copy!")
-
-with col_exp2:
-    # Existing CSV download
-    csv = df.to_csv(index=False)
-    st.download_button(
-        label="💾 Download CSV",
-        data=csv,
-        file_name=f"truthlens_history_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-
-with col_exp3:
-    # NEW: Export full history button
-    if st.button("📊 Export Full History", use_container_width=True):
+if len(history_data) > 0:
+    if st.button("📤 Export Full History", use_container_width=True):
         with st.spinner("Exporting full history..."):
-            # Get ALL history (not just filtered)
-            full_history = load_history_data(limit=1000)  # Increased limit
-            csv_data, filename = export_history_to_csv(full_history)
+            csv_data, filename = export_history_to_csv(history_data)
             
             if csv_data:
                 st.download_button(
@@ -403,3 +378,14 @@ with col_exp3:
                 )
             else:
                 st.warning("No history data to export")
+else:
+    st.info("No history data available for export")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #666; font-size: 0.9rem;">
+    <p>📜 TruthLens Analysis History | Database records from local SQLite</p>
+    <p>Data is stored locally in <code>truthlens.db</code> file</p>
+</div>
+""", unsafe_allow_html=True)

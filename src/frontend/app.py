@@ -125,48 +125,85 @@ elif page == "📜 Analysis History":
 
 elif page == "📊 Performance":
     try:
-        # Try to import from advanced features
+        # Try multiple import approaches
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'advanced'))
-        from performance_monitor import PerformanceMonitor
-        monitor = PerformanceMonitor()
-        monitor.create_performance_dashboard()
-    except ImportError as e:
-        st.error("⚠️ Performance dashboard module not available")
+        
+        # Try importing PerformanceMonitor
+        try:
+            from performance_monitor import PerformanceMonitor
+            monitor = PerformanceMonitor()
+            monitor.create_performance_dashboard()
+        except ImportError:
+            # Try importing performance_dashboard_page directly
+            try:
+                from performance_monitor import performance_dashboard_page
+                performance_dashboard_page()
+            except ImportError:
+                # Try creating instance from module
+                try:
+                    import performance_monitor
+                    if hasattr(performance_monitor, 'PerformanceMonitor'):
+                        monitor = performance_monitor.PerformanceMonitor()
+                        monitor.create_performance_dashboard()
+                    elif hasattr(performance_monitor, 'performance_dashboard_page'):
+                        performance_monitor.performance_dashboard_page()
+                    else:
+                        # Try to call the module directly
+                        performance_monitor.create_performance_dashboard()
+                except Exception as e:
+                    raise ImportError(f"Cannot find PerformanceMonitor: {e}")
+                    
+    except Exception as e:
+        st.error(f"⚠️ Performance dashboard error: {str(e)[:100]}")
         st.info("""
-        The advanced performance monitoring features are not installed.
+        The performance monitoring module exists but has issues.
         
-        **To enable:**
-        1. Make sure `src/advanced/performance_monitor.py` exists
-        2. Install required dependencies: `pip install plotly pandas`
-        3. Restart the application
+        **Quick fixes:**
+        1. Check if `src/advanced/performance_monitor.py` exists
+        2. Make sure it has `PerformanceMonitor` class
+        3. Or use the simplified version below
         """)
-        st.code(f"Import error: {str(e)}", language="python")
         
-        # Show a simplified version as fallback
+        # Show simplified version
         st.markdown("## 📊 Performance Dashboard (Simplified)")
-        st.info("Using basic performance metrics until advanced module is available")
         
-        # Add simple metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("System Status", "🟢 Online")
-        with col2:
-            st.metric("Backend", "✅ Connected")
-        col3.metric("Database", "💾 Active")
-        col4.metric("Storage", "📁 Healthy")
-        
-        # Add placeholder charts
-        st.markdown("### 📈 System Analytics")
-        st.info("Advanced charts require the performance monitor module")
-        
-        # Quick tips
-        st.markdown("### 💡 Quick Tips")
-        st.markdown("""
-        1. Check that `src/advanced/performance_monitor.py` exists
-        2. Install plotly: `pip install plotly`
-        3. Restart the Streamlit server
-        4. Refresh this page
-        """)
+        # Get basic stats from API
+        try:
+            import requests
+            response = requests.get("http://localhost:8000/api/history", params={'limit': 100})
+            if response.status_code == 200:
+                data = response.json()
+                if data and "history" in data:
+                    history = data["history"]
+                    total = len(history)
+                    fake_count = sum(1 for h in history if h.get('is_fake'))
+                    high_risk = sum(1 for h in history if h.get('risk_level') == 'HIGH')
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Total Analyses", total)
+                    with col2:
+                        st.metric("Fake Detected", fake_count)
+                    with col3:
+                        st.metric("High Risk", high_risk)
+                    with col4:
+                        if total > 0:
+                            avg_cnn = sum(h.get('cnn_confidence', 0) for h in history) / total
+                            st.metric("Avg CNN %", f"{avg_cnn:.1f}")
+                        else:
+                            st.metric("Avg CNN %", "0")
+                    
+                    # Show recent analyses
+                    if history:
+                        st.markdown("### Recent Analyses")
+                        recent_df = pd.DataFrame(history[:5])
+                        if not recent_df.empty:
+                            # Select only relevant columns
+                            display_cols = ['filename', 'timestamp', 'is_fake', 'cnn_confidence', 'risk_level']
+                            display_cols = [c for c in display_cols if c in recent_df.columns]
+                            st.dataframe(recent_df[display_cols], use_container_width=True)
+        except Exception as api_error:
+            st.error(f"API error: {api_error}") 
     
 elif page == "⚙️ Settings":
     st.switch_page("pages/settings.py")
