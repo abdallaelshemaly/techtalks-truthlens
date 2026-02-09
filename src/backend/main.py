@@ -31,6 +31,14 @@ except ImportError:
     print("⚠️  Forensics module not available")
     FORENSICS_AVAILABLE = False
 
+# Try to import enhanced forensics
+try:
+    from src.forensics.forensics import run_enhanced_forensic_analysis
+    ENHANCED_FORENSICS_AVAILABLE = True
+except ImportError:
+    ENHANCED_FORENSICS_AVAILABLE = False
+    print("⚠️  Enhanced forensics module not available")
+
 # Try to import advanced report generator
 try:
     from src.advanced.report_generator import TruthLensReportGenerator
@@ -53,9 +61,15 @@ app.add_middleware(
 # Directories
 UPLOAD_DIR = "uploads"
 ELA_DIR = os.path.join(UPLOAD_DIR, "ela_samples")
+ELA_OVERLAY_DIR = os.path.join(UPLOAD_DIR, "ela_overlays")
+COPY_MOVE_VISUAL_DIR = os.path.join(UPLOAD_DIR, "cm_visuals")
 REPORTS_DIR = "reports"
+
+# Create all directories
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(ELA_DIR, exist_ok=True)
+os.makedirs(ELA_OVERLAY_DIR, exist_ok=True)
+os.makedirs(COPY_MOVE_VISUAL_DIR, exist_ok=True)
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 # Mount static directories
@@ -70,7 +84,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Main analyses table
+    # Main analyses table with enhanced fields
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS analyses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,9 +93,14 @@ def init_db():
             is_fake BOOLEAN,
             cnn_confidence REAL,
             ela_score REAL,
+            ela_enhanced_score REAL,
             metadata_score REAL,
             copy_move_score REAL,
+            copy_move_enhanced_score REAL,
             risk_level TEXT,
+            enhanced_risk_level TEXT,
+            ela_overlay_url TEXT,
+            copy_move_visual_url TEXT,
             report_path TEXT,
             file_path TEXT
         )
@@ -100,7 +119,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✅ Database initialized")
+    print("✅ Database initialized with enhanced fields")
 
 def log_analysis(data):
     """Insert analysis into database"""
@@ -109,17 +128,24 @@ def log_analysis(data):
     
     cursor.execute('''
         INSERT INTO analyses 
-        (filename, is_fake, cnn_confidence, ela_score, metadata_score, 
-         copy_move_score, risk_level, report_path, file_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (filename, is_fake, cnn_confidence, ela_score, ela_enhanced_score, 
+         metadata_score, copy_move_score, copy_move_enhanced_score,
+         risk_level, enhanced_risk_level, ela_overlay_url, 
+         copy_move_visual_url, report_path, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         data.get("filename", "unknown"),
         data.get("is_fake", False),
         data.get("cnn_confidence", 0.0),
         data.get("ela_score", 0.0),
+        data.get("ela_enhanced_score", data.get("ela_score", 0.0)),
         data.get("metadata_score", 0.0),
         data.get("copy_move_score", 0.0),
+        data.get("copy_move_enhanced_score", data.get("copy_move_score", 0.0)),
         data.get("risk_level", "Pending"),
+        data.get("enhanced_risk_level", data.get("risk_level", "Pending")),
+        data.get("ela_overlay_url", ""),
+        data.get("copy_move_visual_url", ""),
         data.get("report_path", ""),
         data.get("file_path", "")
     ))
@@ -150,10 +176,15 @@ def get_history(limit=20):
             "is_fake": bool(row[3]),
             "cnn_confidence": row[4],
             "ela_score": row[5],
-            "metadata_score": row[6],
-            "copy_move_score": row[7],
-            "risk_level": row[8],
-            "report_path": row[9]
+            "ela_enhanced_score": row[6],
+            "metadata_score": row[7],
+            "copy_move_score": row[8],
+            "copy_move_enhanced_score": row[9],
+            "risk_level": row[10],
+            "enhanced_risk_level": row[11],
+            "ela_overlay_url": row[12],
+            "copy_move_visual_url": row[13],
+            "report_path": row[14]
         })
     
     return history
@@ -163,6 +194,10 @@ def get_history(limit=20):
 def startup_event():
     """Initialize on startup"""
     print("🚀 Starting TruthLens Backend...")
+    print(f"   - CNN Available: {CNN_AVAILABLE}")
+    print(f"   - Forensics Available: {FORENSICS_AVAILABLE}")
+    print(f"   - Enhanced Forensics: {ENHANCED_FORENSICS_AVAILABLE}")
+    print(f"   - Advanced Reports: {REPORT_GEN_AVAILABLE}")
     init_db()
     print("✅ Backend ready!")
 
@@ -198,9 +233,14 @@ async def upload_image(file: UploadFile = File(...)):
             "is_fake": False,
             "cnn_confidence": 0.0,
             "ela_score": 0.0,
+            "ela_enhanced_score": 0.0,
             "metadata_score": 0.0,
             "copy_move_score": 0.0,
+            "copy_move_enhanced_score": 0.0,
             "risk_level": "Pending",
+            "enhanced_risk_level": "Pending",
+            "ela_overlay_url": "",
+            "copy_move_visual_url": "",
             "report_path": ""
         }
         
@@ -216,6 +256,68 @@ async def upload_image(file: UploadFile = File(...)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+# ---------- Enhanced Forensics Analysis ----------
+@app.post("/api/analyze/enhanced-forensics")
+async def enhanced_forensics(file: UploadFile = File(...)):
+    """Enhanced forensic analysis with visualizations"""
+    try:
+        print(f"📤 Enhanced forensics for: {file.filename}")
+        
+        # Save uploaded file
+        file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{file_timestamp}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        with open(file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        print(f"✅ File saved: {file_path}")
+        
+        # Run enhanced forensic analysis
+        start_time = datetime.now()
+        
+        if ENHANCED_FORENSICS_AVAILABLE:
+            try:
+                results = run_enhanced_forensic_analysis(file_path)
+                print(f"🔍 Enhanced forensics: ELA={results.get('ela_enhanced_score')}, CM={results.get('copy_move_enhanced_score')}")
+            except Exception as e:
+                print(f"⚠️  Enhanced forensics error: {e}")
+                # Fallback to regular forensics
+                results = run_full_forensic_analysis(file_path)
+                results["ela_enhanced_score"] = results["ela_score"]
+                results["copy_move_enhanced_score"] = results["copy_move_score"]
+                results["enhanced_risk_level"] = results["risk_level"]
+                results["ela_overlay_url"] = ""
+                results["copy_move_visual_url"] = ""
+        else:
+            # Fallback to regular forensics
+            results = run_full_forensic_analysis(file_path)
+            results["ela_enhanced_score"] = results["ela_score"]
+            results["copy_move_enhanced_score"] = results["copy_move_score"]
+            results["enhanced_risk_level"] = results["risk_level"]
+            results["ela_overlay_url"] = ""
+            results["copy_move_visual_url"] = ""
+            print("⚠️  Using regular forensics (enhanced not available)")
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        # Prepare response data
+        response_data = {
+            "status": "success",
+            "result": {
+                **results,
+                "processing_time": round(processing_time, 2)
+            }
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        print(f"❌ Enhanced forensics error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Enhanced forensics failed: {str(e)}")
 
 # ---------- Complete Analysis ----------
 @app.post("/api/analyze/complete")
@@ -253,27 +355,67 @@ async def analyze_complete(file: UploadFile = File(...)):
             is_fake = True
             print("⚠️  Using dummy CNN data")
         
-        # 3. Forensic Analysis
-        if FORENSICS_AVAILABLE:
+        # 3. Forensic Analysis (try enhanced first)
+        if ENHANCED_FORENSICS_AVAILABLE:
+            try:
+                forensic_results = run_enhanced_forensic_analysis(file_path)
+                ela_score = forensic_results.get("ela_score", 0.0)
+                ela_enhanced = forensic_results.get("ela_enhanced_score", ela_score)
+                metadata_score = forensic_results.get("metadata_score", 0.0)
+                copy_move_score = forensic_results.get("copy_move_score", 0.0)
+                copy_move_enhanced = forensic_results.get("copy_move_enhanced_score", copy_move_score)
+                forensic_combined = forensic_results.get("enhanced_combined_risk", forensic_results.get("combined_risk", 0.0))
+                ela_overlay_url = forensic_results.get("ela_overlay_url", "")
+                copy_move_visual_url = forensic_results.get("copy_move_visual_url", "")
+                risk_level = forensic_results.get("enhanced_risk_level", forensic_results.get("risk_level", "UNKNOWN"))
+                print(f"🔍 Enhanced Forensics: ELA={ela_enhanced}, CM={copy_move_enhanced}")
+            except Exception as e:
+                print(f"⚠️  Enhanced forensics error, falling back: {e}")
+                forensic_results = run_full_forensic_analysis(file_path)
+                ela_score = forensic_results.get("ela_score", 0.0)
+                ela_enhanced = ela_score
+                metadata_score = forensic_results.get("metadata_score", 0.0)
+                copy_move_score = forensic_results.get("copy_move_score", 0.0)
+                copy_move_enhanced = copy_move_score
+                forensic_combined = forensic_results.get("combined_risk", 0.0)
+                ela_overlay_url = ""
+                copy_move_visual_url = ""
+                risk_level = forensic_results.get("risk_level", "UNKNOWN")
+        elif FORENSICS_AVAILABLE:
             try:
                 forensic_results = run_full_forensic_analysis(file_path)
                 ela_score = forensic_results.get("ela_score", 0.0)
+                ela_enhanced = ela_score
                 metadata_score = forensic_results.get("metadata_score", 0.0)
                 copy_move_score = forensic_results.get("copy_move_score", 0.0)
+                copy_move_enhanced = copy_move_score
                 forensic_combined = forensic_results.get("combined_risk", 0.0)
+                ela_overlay_url = ""
+                copy_move_visual_url = ""
+                risk_level = forensic_results.get("risk_level", "UNKNOWN")
                 print(f"🔍 Forensics: ELA={ela_score}, Meta={metadata_score}, Copy={copy_move_score}")
             except Exception as e:
                 print(f"⚠️  Forensics error: {e}")
                 ela_score = 65.0
+                ela_enhanced = ela_score
                 metadata_score = 45.0
                 copy_move_score = 25.0
+                copy_move_enhanced = copy_move_score
                 forensic_combined = 45.0
+                ela_overlay_url = ""
+                copy_move_visual_url = ""
+                risk_level = "UNKNOWN"
         else:
             # Dummy data for testing
             ela_score = 72.5
+            ela_enhanced = ela_score
             metadata_score = 38.0
             copy_move_score = 15.0
+            copy_move_enhanced = copy_move_score
             forensic_combined = 42.0
+            ela_overlay_url = ""
+            copy_move_visual_url = ""
+            risk_level = "MEDIUM"
             print("⚠️  Using dummy forensic data")
         
         # 4. Calculate Overall Risk
@@ -289,11 +431,11 @@ async def analyze_complete(file: UploadFile = File(...)):
         
         # 5. Determine Risk Level
         if overall_risk >= 70:
-            risk_level = "HIGH"
+            final_risk_level = "HIGH"
         elif overall_risk >= 40:
-            risk_level = "MEDIUM"
+            final_risk_level = "MEDIUM"
         else:
-            risk_level = "LOW"
+            final_risk_level = "LOW"
         
         # 6. Prepare Analysis Data
         analysis_data = {
@@ -301,9 +443,14 @@ async def analyze_complete(file: UploadFile = File(...)):
             "is_fake": is_fake,
             "cnn_confidence": round(cnn_confidence, 2),
             "ela_score": round(ela_score, 2),
+            "ela_enhanced_score": round(ela_enhanced, 2),
             "metadata_score": round(metadata_score, 2),
             "copy_move_score": round(copy_move_score, 2),
-            "risk_level": risk_level,
+            "copy_move_enhanced_score": round(copy_move_enhanced, 2),
+            "risk_level": final_risk_level,
+            "enhanced_risk_level": risk_level,
+            "ela_overlay_url": ela_overlay_url,
+            "copy_move_visual_url": copy_move_visual_url,
             "report_path": "",
             "file_path": file_path,
             "processing_time": round(processing_time, 2)
@@ -364,6 +511,8 @@ async def analyze_complete(file: UploadFile = File(...)):
             "id": analysis_id,
             "result": analysis_data,
             "ela_image_url": ela_image_url,
+            "ela_overlay_url": ela_overlay_url,
+            "copy_move_visual_url": copy_move_visual_url,
             "report_url": report_url,
             "processing_time": round(processing_time, 2)
         }
@@ -479,11 +628,11 @@ async def get_stats():
         fake_count = cursor.fetchone()[0]
         
         # Average scores
-        cursor.execute("SELECT AVG(cnn_confidence), AVG(ela_score) FROM analyses")
-        avg_cnn, avg_ela = cursor.fetchone()
+        cursor.execute("SELECT AVG(cnn_confidence), AVG(ela_enhanced_score), AVG(copy_move_enhanced_score) FROM analyses")
+        avg_cnn, avg_ela_enhanced, avg_cm_enhanced = cursor.fetchone()
         
         # Recent analyses
-        cursor.execute("SELECT filename, risk_level, timestamp FROM analyses ORDER BY timestamp DESC LIMIT 5")
+        cursor.execute("SELECT filename, enhanced_risk_level, timestamp FROM analyses ORDER BY timestamp DESC LIMIT 5")
         recent = cursor.fetchall()
         
         conn.close()
@@ -493,7 +642,8 @@ async def get_stats():
             "fake_count": fake_count,
             "real_count": total - fake_count,
             "avg_cnn_confidence": round(avg_cnn or 0, 2),
-            "avg_ela_score": round(avg_ela or 0, 2),
+            "avg_ela_enhanced_score": round(avg_ela_enhanced or 0, 2),
+            "avg_cm_enhanced_score": round(avg_cm_enhanced or 0, 2),
             "recent_analyses": [
                 {"filename": r[0], "risk_level": r[1], "timestamp": r[2]} 
                 for r in recent
@@ -524,25 +674,29 @@ def generate_simple_report(analysis_data, analysis_id):
             f.write("-" * 40 + "\n")
             
             f.write(f"Risk Level: {analysis_data['risk_level']}\n")
+            f.write(f"Enhanced Risk Level: {analysis_data.get('enhanced_risk_level', analysis_data['risk_level'])}\n")
             f.write(f"CNN Prediction: {'FAKE' if analysis_data['is_fake'] else 'REAL'}\n")
             f.write(f"CNN Confidence: {analysis_data['cnn_confidence']}%\n\n")
             
             f.write("Forensic Analysis:\n")
             f.write(f"  • ELA Score: {analysis_data['ela_score']}%\n")
+            f.write(f"  • ELA Enhanced: {analysis_data.get('ela_enhanced_score', analysis_data['ela_score'])}%\n")
             f.write(f"  • Metadata Score: {analysis_data['metadata_score']}%\n")
-            f.write(f"  • Copy-Move Score: {analysis_data['copy_move_score']}%\n\n")
+            f.write(f"  • Copy-Move Score: {analysis_data['copy_move_score']}%\n")
+            f.write(f"  • Copy-Move Enhanced: {analysis_data.get('copy_move_enhanced_score', analysis_data['copy_move_score'])}%\n\n")
             
             f.write("-" * 40 + "\n")
             f.write("INTERPRETATION\n")
             f.write("-" * 40 + "\n")
             
-            if analysis_data['risk_level'] == "HIGH":
+            risk_level = analysis_data.get('enhanced_risk_level', analysis_data['risk_level'])
+            if risk_level == "HIGH":
                 f.write("⚠️  HIGH RISK: Significant evidence of manipulation detected.\n")
                 f.write("   Recommendations:\n")
                 f.write("   - Verify image source\n")
                 f.write("   - Do not use for authentication\n")
                 f.write("   - Consider expert verification\n")
-            elif analysis_data['risk_level'] == "MEDIUM":
+            elif risk_level == "MEDIUM":
                 f.write("⚠️  MEDIUM RISK: Some suspicious indicators found.\n")
                 f.write("   Recommendations:\n")
                 f.write("   - Check image context\n")
@@ -571,5 +725,6 @@ if __name__ == "__main__":
     print("🚀 Starting TruthLens Backend with enhanced features...")
     print(f"   - CNN Available: {CNN_AVAILABLE}")
     print(f"   - Forensics Available: {FORENSICS_AVAILABLE}")
+    print(f"   - Enhanced Forensics: {ENHANCED_FORENSICS_AVAILABLE}")
     print(f"   - Advanced Reports: {REPORT_GEN_AVAILABLE}")
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

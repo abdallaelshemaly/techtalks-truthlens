@@ -84,6 +84,15 @@ st.markdown("""
     .stProgress > div > div > div > div {
         background: linear-gradient(90deg, #1E88E5 0%, #1565C0 100%);
     }
+    
+    /* Visualization container */
+    .visualization-container {
+        border: 2px solid #e9ecef;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 15px 0;
+        background-color: #f8f9fa;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -96,6 +105,8 @@ if 'processing_time' not in st.session_state:
     st.session_state.processing_time = 0
 if 'uploaded_filename' not in st.session_state:
     st.session_state.uploaded_filename = None
+if 'analysis_type' not in st.session_state:
+    st.session_state.analysis_type = "complete"
 
 # Sidebar - Quick Stats and History
 with st.sidebar:
@@ -107,7 +118,7 @@ with st.sidebar:
         if history_data and "history" in history_data:
             history = history_data["history"]
             total_analyses = len(history)
-            high_risk = sum(1 for h in history if h.get("risk_level") == "HIGH")
+            high_risk = sum(1 for h in history if h.get("enhanced_risk_level", h.get("risk_level")) == "HIGH")
             fake_detected = sum(1 for h in history if h.get("is_fake") == True)
             
             st.metric("Total Analyses", total_analyses)
@@ -165,10 +176,15 @@ if uploaded_file is not None:
     with col2:
         st.markdown("### ⚙️ Analysis Settings")
         
-        # Analysis type
+        # Analysis type with enhanced option
         analysis_type = st.selectbox(
             "**Analysis Mode**",
-            ["Complete Analysis (CNN + Forensics)", "CNN Analysis Only", "Forensic Analysis Only"],
+            [
+                "Complete Analysis (CNN + Forensics)", 
+                "Enhanced Forensics (With Visualizations)",
+                "CNN Analysis Only", 
+                "Forensic Analysis Only"
+            ],
             help="Choose the type of analysis to perform"
         )
         
@@ -187,9 +203,11 @@ if uploaded_file is not None:
                     uploaded_file.seek(0)
                     
                     # Choose endpoint based on analysis type
-                    if "CNN Only" in analysis_type:
+                    if analysis_type == "Enhanced Forensics (With Visualizations)":
+                        endpoint = "/api/analyze/enhanced-forensics"
+                    elif analysis_type == "CNN Analysis Only":
                         endpoint = "/api/analyze/cnn"
-                    elif "Forensic Only" in analysis_type:
+                    elif analysis_type == "Forensic Analysis Only":
                         endpoint = "/api/analyze/forensics"
                     else:
                         endpoint = "/api/analyze/complete"
@@ -201,7 +219,7 @@ if uploaded_file is not None:
                     response = requests.post(
                         f"http://localhost:8000{endpoint}",
                         files=files,
-                        timeout=45
+                        timeout=60  # Increased timeout for enhanced analysis
                     )
                     processing_time = time.time() - start_time
                     
@@ -213,12 +231,14 @@ if uploaded_file is not None:
                         st.session_state.processing_time = processing_time
                         
                         # Determine analysis type for display
-                        if "complete" in endpoint:
-                            st.session_state.analysis_type = "complete"
+                        if "enhanced-forensics" in endpoint:
+                            st.session_state.analysis_type = "enhanced_forensic"
                         elif "cnn" in endpoint:
                             st.session_state.analysis_type = "cnn"
-                        else:
+                        elif "forensics" in endpoint:
                             st.session_state.analysis_type = "forensic"
+                        else:
+                            st.session_state.analysis_type = "complete"
                         
                         # Show success message
                         st.success(f"✅ Analysis complete in {processing_time:.1f} seconds!")
@@ -248,7 +268,219 @@ if uploaded_file is not None:
                 except Exception as e:
                     st.error(f"❌ Unexpected error: {str(e)}")
 
-# Function to display complete results
+# Function to display enhanced forensic results
+def display_enhanced_forensic_results(data, processing_time):
+    """Display enhanced forensic analysis with visualizations"""
+    
+    result = data.get("result", {})
+    if not result:
+        result = data  # Fallback if result is not nested
+    
+    # Enhanced Risk Level
+    risk_level = result.get("enhanced_risk_level", result.get("risk_level", "UNKNOWN")).upper()
+    
+    # Risk display with icon
+    if risk_level == "HIGH":
+        risk_html = '<span class="risk-high">🔴 HIGH RISK</span>'
+        risk_icon = "🔴"
+        risk_description = "Strong evidence of manipulation detected"
+    elif risk_level == "MEDIUM":
+        risk_html = '<span class="risk-medium">🟡 MEDIUM RISK</span>'
+        risk_icon = "🟡"
+        risk_description = "Moderate evidence of possible manipulation"
+    else:
+        risk_html = '<span class="risk-low">🟢 LOW RISK</span>'
+        risk_icon = "🟢"
+        risk_description = "Minimal evidence of manipulation"
+    
+    # Header with risk level
+    col_header1, col_header2, col_header3 = st.columns([2, 1, 1])
+    with col_header1:
+        st.markdown(f"### {risk_icon} Enhanced Forensic Analysis")
+        st.markdown(f"**{risk_description}**")
+    with col_header2:
+        st.markdown(f"**Risk Level:**")
+        st.markdown(risk_html, unsafe_allow_html=True)
+    with col_header3:
+        st.markdown(f"**Processing Time:**")
+        st.markdown(f"**{processing_time:.1f} seconds**")
+    
+    # Enhanced metrics in columns
+    st.markdown("### 🔬 Enhanced Forensic Metrics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        ela_original = result.get("ela_score", 0)
+        ela_enhanced = result.get("ela_enhanced_score", ela_original)
+        st.metric(
+            "ELA Analysis",
+            f"{ela_enhanced:.1f}%",
+            f"Original: {ela_original:.1f}%" if ela_original != ela_enhanced else ""
+        )
+        st.progress(ela_enhanced / 100, text=f"Enhanced ELA: {ela_enhanced:.1f}%")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        cm_original = result.get("copy_move_score", 0)
+        cm_enhanced = result.get("copy_move_enhanced_score", cm_original)
+        st.metric(
+            "Copy-Move Detection",
+            f"{cm_enhanced:.1f}%",
+            f"Original: {cm_original:.1f}%" if cm_original != cm_enhanced else ""
+        )
+        st.progress(cm_enhanced / 100, text=f"Enhanced Copy-Move: {cm_enhanced:.1f}%")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        meta_score = result.get("metadata_score", 0)
+        st.metric(
+            "Metadata",
+            f"{meta_score:.1f}%",
+            "Consistency Score"
+        )
+        st.progress(meta_score / 100, text=f"Metadata: {meta_score:.1f}%")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+        combined_score = result.get("enhanced_combined_risk", result.get("combined_risk", 0))
+        st.metric(
+            "Combined Risk",
+            f"{combined_score:.1f}%",
+            "Enhanced Assessment"
+        )
+        st.progress(combined_score / 100, text=f"Combined Risk: {combined_score:.1f}%")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Visualizations Section
+    st.markdown("### 🎨 Forensic Visualizations")
+    
+    # ELA Overlay Visualization
+    ela_overlay_url = result.get("ela_overlay_url")
+    if ela_overlay_url:
+        st.markdown("#### 🔥 ELA Heatmap Overlay")
+        col_ela1, col_ela2 = st.columns([3, 2])
+        with col_ela1:
+            try:
+                full_url = f"http://localhost:8000{ela_overlay_url}"
+                st.image(full_url, caption="ELA Heatmap Overlay - Red/orange areas indicate compression inconsistencies", 
+                        use_container_width=True)
+            except:
+                st.info("ELA overlay could not be loaded.")
+        
+        with col_ela2:
+            st.markdown("""
+            **What the heatmap shows:**
+            - **Red/Orange:** High compression differences
+            - **Yellow/Green:** Moderate differences  
+            - **Blue:** Minimal differences
+            - **Pattern recognition:** Look for unnatural edges/patterns
+            """)
+    
+    # Copy-Move Visualization
+    cm_visual_url = result.get("copy_move_visual_url")
+    if cm_visual_url:
+        st.markdown("#### 🔍 Copy-Move Detection")
+        col_cm1, col_cm2 = st.columns([3, 2])
+        with col_cm1:
+            try:
+                full_url = f"http://localhost:8000{ela_overlay_url}"
+                st.image(full_url, caption="Copy-Move Detection - Red/blue circles show suspected duplicate regions", 
+                        use_container_width=True)
+            except:
+                st.info("Copy-move visualization could not be loaded.")
+        
+        with col_cm2:
+            st.markdown("""
+            **What the markers show:**
+            - **Red circles:** Source regions
+            - **Blue circles:** Duplicated regions
+            - **Connecting lines:** Matching feature points
+            - **Clustered markers:** Indicate copy-move tampering
+            """)
+    
+    if not ela_overlay_url and not cm_visual_url:
+        st.info("Visualizations were not generated for this analysis. Try 'Enhanced Forensics' mode.")
+    
+    # Enhanced Algorithm Details
+    st.markdown("### ⚡ Enhanced Algorithm Features")
+    
+    with st.expander("📊 Algorithm Improvements", expanded=False):
+        st.markdown("""
+        **Enhanced Detection Methods:**
+        
+        1. **Improved ELA Algorithm:**
+           - Better compression level detection
+           - Adaptive thresholding
+           - Noise reduction filtering
+        
+        2. **Advanced Copy-Move Detection:**
+           - Increased feature points (1500 vs 1000)
+           - Better distance threshold (0.12 vs 0.10)
+           - Enhanced scoring multiplier (3.5x vs 10x)
+        
+        3. **Visualization Generation:**
+           - Heatmap overlays for ELA
+           - Point-to-point matching for copy-move
+           - Real-time processing optimization
+        """)
+    
+    # Recommendations based on risk level
+    st.markdown("### 💡 Recommendations & Next Steps")
+    
+    if risk_level == "HIGH":
+        st.warning("""
+        **⚠️ CRITICAL - High Manipulation Probability Detected**
+        
+        **Immediate Actions:**
+        1. **Do not use** this image for authentication or verification
+        2. **Verify original source** through independent channels
+        3. **Contact subject matter experts** for manual review
+        4. **Document all findings** for evidence preservation
+        """)
+    elif risk_level == "MEDIUM":
+        st.info("""
+        **📝 MODERATE RISK - Further Verification Required**
+        
+        **Recommended Actions:**
+        1. **Cross-reference** with other available sources
+        2. **Verify image context** and provenance
+        3. **Use with caution** in professional contexts
+        4. **Consider manual inspection** if decision-critical
+        """)
+    else:
+        st.success("""
+        **✅ LOW RISK - Appears Authentic**
+        
+        **Standard Protocol:**
+        1. **Standard verification** protocols are sufficient
+        2. **Maintain normal** digital security practices
+        3. **Always verify** critical information through multiple sources
+        """)
+    
+    # Action buttons
+    st.markdown("---")
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    
+    with col_btn1:
+        if st.button("🔄 New Analysis", use_container_width=True):
+            st.session_state.analysis_results = None
+            st.session_state.uploaded_filename = None
+            st.rerun()
+    
+    with col_btn2:
+        if st.button("📜 View History", use_container_width=True):
+            st.switch_page("pages/history.py")
+    
+    with col_btn3:
+        if st.button("🏠 Back to Home", use_container_width=True):
+            st.switch_page("app.py")
+
+# Function to display complete results (keep original for backward compatibility)
 def display_complete_results(data, processing_time):
     """Display complete analysis results with CNN and forensic data."""
     
@@ -406,6 +638,17 @@ def display_complete_results(data, processing_time):
             - **Sharp bright edges:** Indicates object insertion/removal
             """)
     
+    # Enhanced features check
+    ela_enhanced = result.get("ela_enhanced_score")
+    cm_enhanced = result.get("copy_move_enhanced_score")
+    
+    if ela_enhanced or cm_enhanced:
+        st.markdown("### ⭐ Enhanced Features Available")
+        st.info("""
+        This analysis includes enhanced forensic detection. For visualizations and 
+        detailed enhanced analysis, try the **'Enhanced Forensics (With Visualizations)'** mode.
+        """)
+    
     # Recommendations based on risk level
     st.markdown("### 💡 Recommendations & Next Steps")
     
@@ -562,7 +805,9 @@ if st.session_state.analysis_results:
     # Show results based on analysis type
     analysis_type = st.session_state.get("analysis_type", "complete")
     
-    if analysis_type == "complete":
+    if analysis_type == "enhanced_forensic":
+        display_enhanced_forensic_results(data, processing_time)
+    elif analysis_type == "complete":
         display_complete_results(data, processing_time)
     elif analysis_type == "cnn":
         display_cnn_results(data)
@@ -577,6 +822,11 @@ with st.sidebar:
     2. Avoid heavily compressed files
     3. Include original metadata if possible
     4. For best results, use images under 5MB
+    
+    **Enhanced Forensics:**
+    - Generates visual heatmaps
+    - Shows copy-move detections
+    - Better accuracy with enhanced algorithms
     """)
     
     st.markdown("---")
