@@ -8,17 +8,17 @@ import sys
 def setup_directories():
     """Create necessary directories"""
     directories = [
-        "uploads",
-        "uploads/ela_samples",
-        "reports",
-        "logs"
+        "src/backend/uploads",
+        "src/backend/uploads/ela_samples",
+        "src/backend/reports",
+        "src/backend/logs",
+        "evaluation",             
+        "evaluation/results"      
     ]
     
     for directory in directories:
         os.makedirs(directory, exist_ok=True)
         print(f"📁 Created: {directory}")
-    
-    print("✅ All directories created")
 
 def check_dependencies():
     """Check if required packages are installed"""
@@ -63,6 +63,7 @@ def run_backend():
         
         if os.path.exists(backend_dir):
             os.chdir(backend_dir)
+            print(f"📂 Changed to: {backend_dir}")
         
         # Run uvicorn
         subprocess.run([
@@ -79,6 +80,7 @@ def run_backend():
     finally:
         # Return to original directory
         os.chdir(original_dir)
+        print(f"📂 Returned to: {original_dir}")
 
 def main():
     """Main setup and run function"""

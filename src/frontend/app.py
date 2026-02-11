@@ -2,6 +2,7 @@
 TruthLens - Main Streamlit Application
 Home page with navigation to Upload page
 """
+import pandas as pd
 import streamlit as st
 import sys
 import os
@@ -88,7 +89,7 @@ if page == "🏠 Home":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        if st.button("📤 Start New Analysis", type="primary", use_container_width=True):
+        if st.button("📤 Start New Analysis", type="primary", use_container_width='stretch'):
             st.switch_page("pages/upload_analyze.py")
 
     with col2:

@@ -196,7 +196,7 @@ if uploaded_file is not None:
         save_to_history = st.checkbox("💾 Save to History", value=True)
         
         # Analysis button
-        if st.button("🔍 Start Deepfake Analysis", type="primary", use_container_width=True):
+        if st.button("🔍 Start Deepfake Analysis", type="primary", use_container_width='stretch'):
             with st.spinner("🔬 Analyzing image with AI models... This may take 10-30 seconds."):
                 try:
                     # Reset file pointer
@@ -467,17 +467,17 @@ def display_enhanced_forensic_results(data, processing_time):
     col_btn1, col_btn2, col_btn3 = st.columns(3)
     
     with col_btn1:
-        if st.button("🔄 New Analysis", use_container_width=True):
+        if st.button("🔄 New Analysis", use_container_width='stretch'):
             st.session_state.analysis_results = None
             st.session_state.uploaded_filename = None
             st.rerun()
     
     with col_btn2:
-        if st.button("📜 View History", use_container_width=True):
+        if st.button("📜 View History", use_container_width='stretch'):
             st.switch_page("pages/history.py")
     
     with col_btn3:
-        if st.button("🏠 Back to Home", use_container_width=True):
+        if st.button("🏠 Back to Home", use_container_width='stretch'):
             st.switch_page("app.py")
 
 # Function to display complete results (keep original for backward compatibility)

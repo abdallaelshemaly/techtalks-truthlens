@@ -115,16 +115,18 @@ with st.sidebar:
         help="Filter by minimum CNN confidence percentage"
     )
     
-    # Refresh button
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    # Refresh button - FIXED use_container_width
+    if st.button("🔄 Refresh Data", use_container_width='stretch'):
         st.cache_data.clear()
         st.rerun()
     
     st.markdown("---")
-    if st.button("📤 New Analysis"):
+    # FIXED use_container_width
+    if st.button("📤 New Analysis", use_container_width='stretch'):
         st.switch_page("pages/upload_analyze.py")
     
-    if st.button("🏠 Back to Home"):
+    # FIXED use_container_width
+    if st.button("🏠 Back to Home", use_container_width='stretch'):
         st.switch_page("app.py")
 
 # Load data
@@ -139,13 +141,14 @@ if not history_data:
     3. Your first analysis will appear here!
     """)
     
-    if st.button("📤 Go to Upload Page", type="primary"):
+    # FIXED use_container_width
+    if st.button("📤 Go to Upload Page", type="primary", use_container_width='stretch'):
         st.switch_page("pages/upload_analyze.py")
     
     # Early return to avoid errors
     st.stop()
 
-# Convert to DataFrame
+# Convert to DataFrame - FIXED Arrow serialization issue
 df_data = []
 for item in history_data:
     # Format risk badge
@@ -169,17 +172,18 @@ for item in history_data:
     else:
         formatted_time = "N/A"
     
+    # FIXED: Convert ALL non-numeric columns to strings
     df_data.append({
-        "ID": item.get("id", ""),
-        "Filename": item.get("filename", "Unknown"),
-        "Date": formatted_time,
-        "Risk": risk_badge,
-        "CNN %": float(item.get("cnn_confidence", 0)),
-        "ELA %": float(item.get("ela_score", 0)),
-        "Meta %": float(item.get("metadata_score", 0)),
-        "CM %": float(item.get("copy_move_score", 0)),
-        "Is Fake": "✅" if item.get("is_fake") else "❌",
-        "Risk Level": risk_level  # Hidden column for filtering
+        "ID": str(item.get("id", "")),  # Convert to string
+        "Filename": str(item.get("filename", "Unknown")),  # Convert to string
+        "Date": str(formatted_time),  # Convert to string
+        "Risk": str(risk_badge),  # Convert to string
+        "CNN %": float(item.get("cnn_confidence", 0)),  # Keep as float for progress column
+        "ELA %": float(item.get("ela_score", 0)),  # Keep as float
+        "Meta %": float(item.get("metadata_score", 0)),  # Keep as float
+        "CM %": float(item.get("copy_move_score", 0)),  # Keep as float
+        "Is Fake": str("✅" if item.get("is_fake") else "❌"),  # Convert to string
+        "Risk Level": str(risk_level)  # Convert to string
     })
 
 df = pd.DataFrame(df_data)
@@ -216,7 +220,7 @@ st.markdown(f"### Showing {len(df)} of {len(history_data)} analyses")
 # Create display DataFrame (without hidden columns)
 display_df = df.drop(columns=["Risk Level", "ID"]).copy()
 
-# Display as interactive table
+# Display as interactive table - FIXED use_container_width
 if len(display_df) > 0:
     st.dataframe(
         display_df,
@@ -271,7 +275,7 @@ if len(display_df) > 0:
             )
         },
         hide_index=True,
-        use_container_width=True
+        use_container_width='stretch'  # FIXED
     )
 else:
     st.info("No analyses match your filters. Try adjusting filter settings.")
@@ -285,19 +289,20 @@ if len(df) > 0:  # Only show export if we have data
     
     with col_exp1:
         csv_data = df.to_csv(index=False)
-        if st.button("📋 Copy to Clipboard", use_container_width=True):
+        # FIXED use_container_width
+        if st.button("📋 Copy to Clipboard", use_container_width='stretch'):
             st.code(csv_data[:500] + "..." if len(csv_data) > 500 else csv_data, language="text")
             st.success("CSV data ready to copy!")
     
     with col_exp2:
-        # Download button
+        # Download button - FIXED use_container_width
         csv = df.to_csv(index=False)
         st.download_button(
             label="💾 Download CSV",
             data=csv,
             file_name=f"truthlens_history_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
-            use_container_width=True
+            use_container_width='stretch'  # FIXED
         )
     
     # Chart visualization
@@ -336,18 +341,18 @@ def export_history_to_csv(history_data, filename="truthlens_history_export.csv")
     rows = []
     for item in history_data:
         rows.append({
-            'ID': item.get('id', ''),
-            'Filename': item.get('filename', 'Unknown'),
-            'Timestamp': item.get('timestamp', ''),
+            'ID': str(item.get('id', '')),
+            'Filename': str(item.get('filename', 'Unknown')),
+            'Timestamp': str(item.get('timestamp', '')),
             'Is_Fake': 'Yes' if item.get('is_fake') else 'No',
-            'CNN_Confidence': item.get('cnn_confidence', 0),
-            'ELA_Score': item.get('ela_score', 0),
-            'ELA_Enhanced_Score': item.get('ela_enhanced_score', item.get('ela_score', 0)),
-            'Metadata_Score': item.get('metadata_score', 0),
-            'Copy_Move_Score': item.get('copy_move_score', 0),
-            'Copy_Move_Enhanced_Score': item.get('copy_move_enhanced_score', item.get('copy_move_score', 0)),
-            'Risk_Level': item.get('risk_level', 'UNKNOWN'),
-            'Enhanced_Risk_Level': item.get('enhanced_risk_level', item.get('risk_level', 'UNKNOWN'))
+            'CNN_Confidence': float(item.get('cnn_confidence', 0)),
+            'ELA_Score': float(item.get('ela_score', 0)),
+            'ELA_Enhanced_Score': float(item.get('ela_enhanced_score', item.get('ela_score', 0))),
+            'Metadata_Score': float(item.get('metadata_score', 0)),
+            'Copy_Move_Score': float(item.get('copy_move_score', 0)),
+            'Copy_Move_Enhanced_Score': float(item.get('copy_move_enhanced_score', item.get('copy_move_score', 0))),
+            'Risk_Level': str(item.get('risk_level', 'UNKNOWN')),
+            'Enhanced_Risk_Level': str(item.get('enhanced_risk_level', item.get('risk_level', 'UNKNOWN')))
         })
     
     # Create DataFrame and CSV
@@ -359,11 +364,12 @@ def export_history_to_csv(history_data, filename="truthlens_history_export.csv")
     
     return df_full.to_csv(index=False), filename
 
-# NEW: Export full history button
+# Export full history button
 st.markdown("### 📊 Export Full History")
 
 if len(history_data) > 0:
-    if st.button("📤 Export Full History", use_container_width=True):
+    # FIXED use_container_width
+    if st.button("📤 Export Full History", use_container_width='stretch'):
         with st.spinner("Exporting full history..."):
             csv_data, filename = export_history_to_csv(history_data)
             
@@ -374,7 +380,7 @@ if len(history_data) > 0:
                     file_name=filename,
                     mime="text/csv",
                     key="full_history_download",
-                    use_container_width=True
+                    use_container_width='stretch'  # FIXED
                 )
             else:
                 st.warning("No history data to export")

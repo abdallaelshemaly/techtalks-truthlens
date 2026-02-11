@@ -12,6 +12,7 @@ import sqlite3
 from datetime import datetime, timezone
 import sys
 import traceback
+from evaluation_routes import router as evaluation_router
 
 # Add src to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
@@ -50,6 +51,8 @@ except ImportError:
 
 app = FastAPI(title="TruthLens API", description="Deepfake Detection System")
 
+app.include_router(evaluation_router)
+
 # Allow CORS for Streamlit frontend
 app.add_middleware(
     CORSMiddleware,
@@ -58,26 +61,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Directories
-UPLOAD_DIR = "uploads"
+CURRENT_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = CURRENT_FILE_DIR 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_FILE_DIR)) 
+
+UPLOAD_DIR = os.path.join(BACKEND_DIR, "uploads")
 ELA_DIR = os.path.join(UPLOAD_DIR, "ela_samples")
 ELA_OVERLAY_DIR = os.path.join(UPLOAD_DIR, "ela_overlays")
 COPY_MOVE_VISUAL_DIR = os.path.join(UPLOAD_DIR, "cm_visuals")
-REPORTS_DIR = "reports"
+REPORTS_DIR = os.path.join(BACKEND_DIR, "reports")  
+EVALUATION_DIR = os.path.join(BACKEND_DIR, "evaluation") 
 
-# Create all directories
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(ELA_DIR, exist_ok=True)
 os.makedirs(ELA_OVERLAY_DIR, exist_ok=True)
 os.makedirs(COPY_MOVE_VISUAL_DIR, exist_ok=True)
 os.makedirs(REPORTS_DIR, exist_ok=True)
+os.makedirs(EVALUATION_DIR, exist_ok=True)
+os.makedirs(os.path.join(EVALUATION_DIR, "results"), exist_ok=True)
 
-# Mount static directories
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
+app.mount("/evaluation", StaticFiles(directory=EVALUATION_DIR), name="evaluation")
 
-# Database setup
-DB_PATH = "truthlens.db"
+DB_PATH = os.path.join(BACKEND_DIR, "truthlens.db") 
 
 def init_db():
     """Initialize database on startup"""
@@ -719,6 +726,77 @@ def generate_simple_report(analysis_data, analysis_id):
         print(f"⚠️  Simple report generation failed: {e}")
         return ""
 
+# ---------- Model Evaluation Endpoint (ADD THIS) ----------
+@app.get("/api/model/evaluation")
+async def get_model_evaluation():
+    """
+    Get CNN model evaluation metrics from evaluation script
+    Returns accuracy, precision, recall, inference time, confusion matrix
+    """
+    try:
+        # Paths to evaluation results
+        metrics_path = "evaluation/results/metrics.txt"
+        time_path = "evaluation/results/inference_time.txt"
+        cm_path = "evaluation/results/confusion_matrix.png"
+        
+        metrics = {}
+        
+        # Read metrics file
+        if os.path.exists(metrics_path):
+            with open(metrics_path, 'r') as f:
+                for line in f:
+                    if '=' in line:
+                        key, value = line.strip().split('=')
+                        try:
+                            metrics[key] = float(value)
+                        except ValueError:
+                            metrics[key] = value
+        else:
+            return JSONResponse(content={
+                "status": "error",
+                "message": "Evaluation metrics not found. Run evaluation/evaluate_testset.py first",
+                "metrics": {}
+            })
+        
+        # Read inference time
+        if os.path.exists(time_path):
+            with open(time_path, 'r') as f:
+                for line in f:
+                    if '=' in line:
+                        key, value = line.strip().split('=')
+                        try:
+                            metrics[key] = float(value) if key != 'pass_avg_lt_2s' else (value == 'True')
+                        except ValueError:
+                            metrics[key] = value
+        
+        # Check if confusion matrix exists
+        cm_url = None
+        if os.path.exists(cm_path):
+            # You might want to serve static files from evaluation folder
+            # For now, just return the path
+            cm_url = "/evaluation/results/confusion_matrix.png"
+        
+        return JSONResponse(content={
+
+            "status": "success",
+            "metrics": metrics,
+            "confusion_matrix_url": cm_url,
+            "inference_pass": metrics.get('pass_avg_lt_2s', False),
+            "model_path": "checkpoints/BEST_DEEPFAKE_MODEL.pth"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting model evaluation: {e}")
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e)
+            }
+        )
+    
+    
 # ---------- Run Server ----------
 if __name__ == "__main__":
     import uvicorn

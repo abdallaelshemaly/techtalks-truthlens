@@ -210,10 +210,10 @@ st.markdown("---")
 col1, col2, col3 = st.columns([1, 2, 1])
 
 with col2:
-    if st.button("💾 Save Settings", type="primary", use_container_width=True):
+    if st.button("💾 Save Settings", type="primary", use_container_width='stretch'):
         st.success("Settings saved successfully! (mock action)")
     
-    if st.button("🔄 Reset to Defaults", type="secondary", use_container_width=True):
+    if st.button("🔄 Reset to Defaults", type="secondary", use_container_width='stretch'):
         st.warning("This will reset all settings to default values.")
         if st.checkbox("Confirm reset"):
             st.info("Settings reset to defaults (mock action)")

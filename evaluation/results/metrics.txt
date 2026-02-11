@@ -1,4 +1,10 @@
-accuracy=0.9534313725490197
-precision_fake=0.9675675675675676
-recall_fake=0.9322916666666666
-f1_fake=0.9496021220159151
+accuracy=0.6666666666666666
+precision_fake=0.6666666666666666
+recall_fake=1.0
+f1_fake=0.8
+tn=0
+fp=1
+fn=0
+tp=2
+total_samples=3
+timestamp=2026-02-11T20:32:06.481894
