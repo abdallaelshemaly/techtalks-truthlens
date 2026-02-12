@@ -13,7 +13,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Main analyses table with enhanced fields
+    # Main analyses table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS analyses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,22 +22,26 @@ def init_db():
             is_fake BOOLEAN,
             cnn_confidence REAL,
             ela_score REAL,
-            ela_enhanced_score REAL,
             metadata_score REAL,
             copy_move_score REAL,
-            copy_move_enhanced_score REAL,
             risk_level TEXT,
-            enhanced_risk_level TEXT,
-            ela_overlay_url TEXT,
-            copy_move_visual_url TEXT,
             report_path TEXT,
             file_path TEXT
         )
     ''')
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_timestamp
+        ON analyses(timestamp)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_is_fake
+        ON analyses(is_fake)
+    """)
 
     conn.commit()
     conn.close()
-    print("✅ Database initialized successfully with enhanced fields.")
+    print("✅ Database initialized successfully.")
 
 
 def log_analysis(data):
@@ -47,24 +51,17 @@ def log_analysis(data):
 
     cursor.execute('''
         INSERT INTO analyses 
-        (filename, is_fake, cnn_confidence, ela_score, ela_enhanced_score, 
-         metadata_score, copy_move_score, copy_move_enhanced_score,
-         risk_level, enhanced_risk_level, ela_overlay_url, 
-         copy_move_visual_url, report_path, file_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (filename, is_fake, cnn_confidence, ela_score, metadata_score, 
+         copy_move_score, risk_level, report_path, file_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         data.get("filename", "unknown"),
         data.get("is_fake", False),
         data.get("cnn_confidence", 0.0),
         data.get("ela_score", 0.0),
-        data.get("ela_enhanced_score", data.get("ela_score", 0.0)),
         data.get("metadata_score", 0.0),
         data.get("copy_move_score", 0.0),
-        data.get("copy_move_enhanced_score", data.get("copy_move_score", 0.0)),
         data.get("risk_level", "Unknown"),
-        data.get("enhanced_risk_level", data.get("risk_level", "Unknown")),
-        data.get("ela_overlay_url", ""),
-        data.get("copy_move_visual_url", ""),
         data.get("report_path", ""),
         data.get("file_path", "")
     ))
@@ -95,15 +92,10 @@ def get_history(limit=20):
             "is_fake": bool(row[3]),
             "cnn_confidence": row[4],
             "ela_score": row[5],
-            "ela_enhanced_score": row[6],
-            "metadata_score": row[7],
-            "copy_move_score": row[8],
-            "copy_move_enhanced_score": row[9],
-            "risk_level": row[10],
-            "enhanced_risk_level": row[11],
-            "ela_overlay_url": row[12],
-            "copy_move_visual_url": row[13],
-            "report_path": row[14]
+            "metadata_score": row[6],
+            "copy_move_score": row[7],
+            "risk_level": row[8],
+            "report_path": row[9]
         })
     
     conn.close()
@@ -126,15 +118,10 @@ def get_analysis_by_id(analysis_id):
             "is_fake": bool(row[3]),
             "cnn_confidence": row[4],
             "ela_score": row[5],
-            "ela_enhanced_score": row[6],
-            "metadata_score": row[7],
-            "copy_move_score": row[8],
-            "copy_move_enhanced_score": row[9],
-            "risk_level": row[10],
-            "enhanced_risk_level": row[11],
-            "ela_overlay_url": row[12],
-            "copy_move_visual_url": row[13],
-            "report_path": row[14]
+            "metadata_score": row[6],
+            "copy_move_score": row[7],
+            "risk_level": row[8],
+            "report_path": row[9]
         }
     return None
 
@@ -153,8 +140,8 @@ def get_stats():
     fake_count = cursor.fetchone()[0]
     
     # Average risk scores
-    cursor.execute("SELECT AVG(cnn_confidence), AVG(ela_enhanced_score), AVG(copy_move_enhanced_score) FROM analyses")
-    avg_cnn, avg_ela_enhanced, avg_cm_enhanced = cursor.fetchone()
+    cursor.execute("SELECT AVG(cnn_confidence), AVG(ela_score) FROM analyses")
+    avg_cnn, avg_ela = cursor.fetchone()
     
     conn.close()
     
@@ -163,12 +150,11 @@ def get_stats():
         "fake_count": fake_count,
         "real_count": total - fake_count,
         "avg_cnn_confidence": avg_cnn or 0,
-        "avg_ela_enhanced_score": avg_ela_enhanced or 0,
-        "avg_cm_enhanced_score": avg_cm_enhanced or 0
+        "avg_ela_score": avg_ela or 0
     }
 
 
 if __name__ == "__main__":
     # Test the database
     init_db()
-    print("Database test completed with enhanced fields.")
+    print("Database test completed.")
