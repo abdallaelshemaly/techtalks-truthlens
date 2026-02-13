@@ -754,3 +754,4 @@ def performance_dashboard_page():
 # For direct execution
 if __name__ == "__main__":
     performance_dashboard_page()
+

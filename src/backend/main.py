@@ -1,41 +1,109 @@
 """
 FastAPI Backend for TruthLens
+Fixed 404 Errors, added Validation, Health Checks, and Swagger Docs
 """
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import shutil
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any
 import os
 import uuid
-import sqlite3
-from datetime import datetime, timezone
 import sys
 import traceback
+from datetime import datetime
 
+# Local imports - Ensure we use the robust database.py
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import database
 
-# Add src to path for imports
+# Root imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+from evaluation_routes import router as evaluation_router
 
-# Try to import project modules
+# --- Feature Flags ---
 try:
     from src.cnn.loader import predict_image
     CNN_AVAILABLE = True
 except ImportError:
-    print("⚠️  CNN module not available, using dummy predictions")
+    print("⚠️ CNN module not available")
     CNN_AVAILABLE = False
 
 try:
     from src.forensics.forensics import run_full_forensic_analysis
     FORENSICS_AVAILABLE = True
 except ImportError:
-    print("⚠️  Forensics module not available")
+    print("⚠️ Forensics module not available")
     FORENSICS_AVAILABLE = False
 
-app = FastAPI(title="TruthLens Deepfake Detection API", description="AI-powered backend for detecting image manipulation using CNN and forensics analysis.", version="1.0.0")
+try:
+    from src.forensics.forensics import run_enhanced_forensic_analysis
+    ENHANCED_FORENSICS_AVAILABLE = True
+except ImportError:
+    ENHANCED_FORENSICS_AVAILABLE = False
+    print("⚠️ Enhanced forensics module not available")
 
-# Allow CORS for Streamlit frontend
+try:
+    from src.advanced.report_generator import TruthLensReportGenerator
+    REPORT_GEN_AVAILABLE = True
+except ImportError:
+    REPORT_GEN_AVAILABLE = False
+    print("⚠️ Advanced report generator not available")
+
+# --- Pydantic Models (Task 2: API Docs) ---
+class AnalysisResultSchema(BaseModel):
+    filename: str
+    is_fake: bool
+    cnn_confidence: float
+    ela_score: float
+    ela_enhanced_score: Optional[float] = 0.0
+    metadata_score: float
+    copy_move_score: float
+    copy_move_enhanced_score: Optional[float] = 0.0
+    risk_level: str
+    enhanced_risk_level: Optional[str] = "UNKNOWN"
+    ela_overlay_url: Optional[str] = None
+    copy_move_visual_url: Optional[str] = None
+    report_path: str
+    processing_time: float
+
+class AnalysisResponse(BaseModel):
+    status: str
+    id: int
+    result: AnalysisResultSchema
+    ela_image_url: Optional[str] = None
+    ela_overlay_url: Optional[str] = None
+    copy_move_visual_url: Optional[str] = None
+    report_url: Optional[str] = None
+
+class HealthResponse(BaseModel):
+    status: str
+    database: str
+    timestamp: datetime
+
+class StatsResponse(BaseModel):
+    total_analyses: int
+    fake_count: int
+    real_count: int
+    avg_cnn_confidence: float
+    avg_ela_enhanced_score: float
+    avg_cm_enhanced_score: float
+    recent_analyses: List[Dict[str, Any]]
+
+class HistoryResponse(BaseModel):
+    history: List[Dict[str, Any]]
+    count: int
+
+# --- App Setup ---
+app = FastAPI(
+    title="TruthLens API", 
+    description="Deepfake Detection Backend with Enhanced Forensics",
+    version="2.1.0"
+)
+
+app.include_router(evaluation_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,183 +111,112 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Directories
-UPLOAD_DIR = "uploads"
+# --- Directories ---
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(CURRENT_DIR, "uploads")
 ELA_DIR = os.path.join(UPLOAD_DIR, "ela_samples")
-REPORTS_DIR = "reports"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(ELA_DIR, exist_ok=True)
-os.makedirs(REPORTS_DIR, exist_ok=True)
+ELA_OVERLAY_DIR = os.path.join(UPLOAD_DIR, "ela_overlays")
+COPY_MOVE_VISUAL_DIR = os.path.join(UPLOAD_DIR, "cm_visuals")
+REPORTS_DIR = os.path.join(CURRENT_DIR, "reports")
+EVALUATION_DIR = os.path.join(CURRENT_DIR, "evaluation")
 
-# Mount static directories
+for d in [UPLOAD_DIR, ELA_DIR, ELA_OVERLAY_DIR, COPY_MOVE_VISUAL_DIR, REPORTS_DIR, EVALUATION_DIR]:
+    os.makedirs(d, exist_ok=True)
+os.makedirs(os.path.join(EVALUATION_DIR, "results"), exist_ok=True)
+
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/reports", StaticFiles(directory=REPORTS_DIR), name="reports")
+app.mount("/evaluation", StaticFiles(directory=EVALUATION_DIR), name="evaluation")
 
-# Database setup
-DB_PATH = "truthlens.db"
+# --- Validation Helper (Task 3) ---
+def validate_file(file: UploadFile):
+    # Basic check for image content type
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image")
+    
+    # Check extension
+    ext = os.path.splitext(file.filename)[1].lower()
+    valid_exts = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"]
+    if ext not in valid_exts:
+        raise HTTPException(400, f"Unsupported file extension: {ext}. Valid types: {valid_exts}")
 
-def init_db():
-    """Initialize database on startup"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Main analyses table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS analyses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_fake BOOLEAN,
-            cnn_confidence REAL,
-            ela_score REAL,
-            metadata_score REAL,
-            copy_move_score REAL,
-            risk_level TEXT,
-            report_path TEXT,
-            file_path TEXT
-        )
-    ''')
-    
-    # Batch analyses table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS batch (
-            id TEXT PRIMARY KEY,
-            total_images INTEGER,
-            processed_images INTEGER,
-            status TEXT,
-            results_summary TEXT
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print("✅ Database initialized")
-
-def log_analysis(data):
-    """Insert analysis into database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        INSERT INTO analyses 
-        (filename, is_fake, cnn_confidence, ela_score, metadata_score, 
-         copy_move_score, risk_level, report_path, file_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        data.get("filename", "unknown"),
-        data.get("is_fake", False),
-        data.get("cnn_confidence", 0.0),
-        data.get("ela_score", 0.0),
-        data.get("metadata_score", 0.0),
-        data.get("copy_move_score", 0.0),
-        data.get("risk_level", "Pending"),
-        data.get("report_path", ""),
-        data.get("file_path", "")
-    ))
-    
-    conn.commit()
-    analysis_id = cursor.lastrowid
-    conn.close()
-    return analysis_id
-
-def get_history(limit=20):
-    """Get analysis history from database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM analyses ORDER BY timestamp DESC LIMIT ?",
-        (limit,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    
-    # Convert to list of dictionaries
-    history = []
-    for row in rows:
-        history.append({
-            "id": row[0],
-            "filename": row[1],
-            "timestamp": row[2],
-            "is_fake": bool(row[3]),
-            "cnn_confidence": row[4],
-            "ela_score": row[5],
-            "metadata_score": row[6],
-            "copy_move_score": row[7],
-            "risk_level": row[8],
-            "report_path": row[9]
-        })
-    
-    return history
-
-# ---------- Startup ----------
+# --- Events ---
 @app.on_event("startup")
 def startup_event():
-    """Initialize on startup"""
     print("🚀 Starting TruthLens Backend...")
-    init_db()
-    print("✅ Backend ready!")
+    # Use database.py to init and migrate
+    database.init_db()
 
-# ---------- Health Check ----------
-@app.get("/", tags=["System"], summary="Root Endpoint", description="Basic health confirmation that the API is running")
+# --- Endpoints ---
+
+@app.get("/", tags=["System"])
 async def root():
     return {"message": "TruthLens API is running", "status": "healthy"}
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: str
-@app.get("/health", response_model=HealthResponse, tags=["System"], summary="Health Check", description="Returns API health status and server timestamp")
-async def health_check():
-    return {"status":"healthy", "timestamp":datetime.now().isoformat()}
 
-# ---------- Upload Endpoint (Keep existing) ----------
-@app.post("/upload", tags=["Upload"], summary="Upload Image", description="Uploads an image file and stores an initial analysis record.")
-async def upload_image(file: UploadFile = File(...)):
-    """Simple upload endpoint - saves file and returns ID."""
+@app.get("/health", response_model=HealthResponse, tags=["System"])
+async def health_check():
+    """Health check endpoint with DB status (Task 4)."""
+    db_status = "connected" if database.check_db_connection() else "disconnected"
+    return {
+        "status": "healthy",
+        "database": db_status,
+        "timestamp": datetime.now()
+    }
+
+@app.get("/api/history", response_model=HistoryResponse, tags=["History"])
+async def fetch_history(limit: int = Query(20), offset: int = Query(0)):
+    """Get history with offset (fixes 404 error)."""
     try:
-        # Generate unique filename
+        history = database.get_history(limit, offset)
+        return {"history": history, "count": len(history)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/stats", response_model=StatsResponse, tags=["History"])
+async def get_stats():
+    """Get system statistics."""
+    try:
+        return database.get_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/upload", tags=["Upload"])
+async def upload_image(file: UploadFile = File(...)):
+    """Simple upload endpoint."""
+    validate_file(file)
+    try:
         file_id = str(uuid.uuid4())
-        original_name = file.filename or "unknown.jpg"
-        filename = f"{file_id}_{original_name}"
+        filename = f"{file_id}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, filename)
         
-        # Save file
         with open(file_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
-        
-        # Create initial database record
-        analysis_data = {
-            "filename": original_name,
-            "file_path": file_path,
-            "is_fake": False,
-            "cnn_confidence": 0.0,
-            "ela_score": 0.0,
-            "metadata_score": 0.0,
-            "copy_move_score": 0.0,
-            "risk_level": "Pending",
-            "report_path": ""
+            
+        # Log placeholder using database.py
+        data = {
+            "filename": file.filename, "file_path": file_path, "is_fake": False,
+            "cnn_confidence": 0.0, "ela_score": 0.0, "ela_enhanced_score": 0.0,
+            "metadata_score": 0.0, "copy_move_score": 0.0, "copy_move_enhanced_score": 0.0,
+            "risk_level": "Pending", "enhanced_risk_level": "Pending"
         }
+        analysis_id = database.log_analysis(data)
         
-        analysis_id = log_analysis(analysis_data)
-        
-        return JSONResponse(content={
-            "status": "success",
-            "message": "File uploaded successfully",
-            "id": analysis_id,
-            "filename": original_name,
-            "file_path": file_path
-        })
-        
+        return {
+            "status": "success", "id": analysis_id, 
+            "filename": file.filename, "file_path": file_path
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        raise HTTPException(500, str(e))
 
-# ---------- Complete Analysis (NEW - Most Important) ----------
-@app.post("/api/analyze/complete", tags=["Analysis"], summary="Run complete deepfake analysis", description="Performs CNN prediction, forensic analysis, saves results in database, and generates a report")
+@app.post("/api/analyze/complete", response_model=AnalysisResponse, tags=["Analysis"])
 async def analyze_complete(file: UploadFile = File(...)):
-    """Complete analysis: CNN + Forensics + Database"""
+    """Complete analysis with Enhanced Forensics."""
+    validate_file(file)
     try:
-        print(f"📤 Received file: {file.filename}")
+        start_time = datetime.now()
         
-        # 1. Save uploaded file
+        # 1. Save
         file_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{file_timestamp}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, filename)
@@ -227,253 +224,198 @@ async def analyze_complete(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
-        
+            
         print(f"✅ File saved: {file_path}")
-        
+
         # 2. CNN Prediction
+        cnn_conf = 0.0
+        is_fake = False
         if CNN_AVAILABLE:
             try:
-                cnn_prediction, cnn_confidence = predict_image(file_path)
-                is_fake = cnn_prediction == "FAKE"
-                print(f"🤖 CNN: {cnn_prediction} ({cnn_confidence}%)")
+                pred, cnn_conf = predict_image(file_path)
+                is_fake = (pred == "FAKE")
             except Exception as e:
-                print(f"⚠️  CNN error: {e}")
+                print(f"⚠️ CNN error: {e}")
                 # Fallback to dummy
-                cnn_confidence = 75.0
-                is_fake = True
+                cnn_conf = 75.0; is_fake = True
         else:
-            # Dummy data for testing
-            cnn_confidence = 85.5
-            is_fake = True
-            print("⚠️  Using dummy CNN data")
+            cnn_conf = 85.5; is_fake = True
+            
+        # 3. Forensics
+        ela_score = 0.0
+        meta_score = 0.0
+        copy_score = 0.0
+        enhanced_scores = {}
         
-        # 3. Forensic Analysis
-        if FORENSICS_AVAILABLE:
+        # Initialize default values for enhanced fields
+        enhanced_scores = {
+            'ela_enhanced_score': 0.0,
+            'copy_move_enhanced_score': 0.0,
+            'enhanced_risk_level': "UNKNOWN",
+            'ela_overlay_url': "",
+            'copy_move_visual_url': ""
+        }
+
+        if ENHANCED_FORENSICS_AVAILABLE:
             try:
-                forensic_results = run_full_forensic_analysis(file_path)
-                ela_score = forensic_results.get("ela_score", 0.0)
-                metadata_score = forensic_results.get("metadata_score", 0.0)
-                copy_move_score = forensic_results.get("copy_move_score", 0.0)
-                forensic_combined = forensic_results.get("combined_risk", 0.0)
-                print(f"🔍 Forensics: ELA={ela_score}, Meta={metadata_score}, Copy={copy_move_score}")
+                print("🔍 Running Enhanced Forensics...")
+                res = run_enhanced_forensic_analysis(file_path)
+                
+                ela_score = res.get('ela_score', 0)
+                meta_score = res.get('metadata_score', 0)
+                copy_score = res.get('copy_move_score', 0)
+                
+                enhanced_scores['ela_enhanced_score'] = res.get('ela_enhanced_score', ela_score)
+                enhanced_scores['copy_move_enhanced_score'] = res.get('copy_move_enhanced_score', copy_score)
+                enhanced_scores['enhanced_risk_level'] = res.get('enhanced_risk_level', res.get('risk_level', "UNKNOWN"))
+                enhanced_scores['ela_overlay_url'] = res.get('ela_overlay_url', "")
+                enhanced_scores['copy_move_visual_url'] = res.get('copy_move_visual_url', "")
+                
             except Exception as e:
-                print(f"⚠️  Forensics error: {e}")
-                ela_score = 65.0
-                metadata_score = 45.0
-                copy_move_score = 25.0
-                forensic_combined = 45.0
-        else:
-            # Dummy data for testing
-            ela_score = 72.5
-            metadata_score = 38.0
-            copy_move_score = 15.0
-            forensic_combined = 42.0
-            print("⚠️  Using dummy forensic data")
+                print(f"⚠️ Enhanced forensics failed, falling back: {e}")
+                if FORENSICS_AVAILABLE:
+                    res = run_full_forensic_analysis(file_path)
+                    ela_score = res.get('ela_score', 0)
+                    meta_score = res.get('metadata_score', 0)
+                    copy_score = res.get('copy_move_score', 0)
+                    # Use standard scores as enhanced fallback
+                    enhanced_scores['ela_enhanced_score'] = ela_score
+                    enhanced_scores['copy_move_enhanced_score'] = copy_score
         
-        # 4. Calculate Overall Risk
-        if is_fake:
-            overall_risk = (forensic_combined * 0.5) + (cnn_confidence * 0.5)
-        else:
-            overall_risk = forensic_combined
+        elif FORENSICS_AVAILABLE:
+            print("🔍 Running Standard Forensics...")
+            try:
+                res = run_full_forensic_analysis(file_path)
+                ela_score = res.get('ela_score', 0)
+                meta_score = res.get('metadata_score', 0)
+                copy_score = res.get('copy_move_score', 0)
+                enhanced_scores['ela_enhanced_score'] = ela_score
+                enhanced_scores['copy_move_enhanced_score'] = copy_score
+            except Exception as e:
+                print(f"⚠️ Standard forensics error: {e}")
+
+        # 4. Risk Calculation
+        risk = "LOW"
+        # Simple risk logic (can be made more complex)
+        risk_score = 0
+        if is_fake: risk_score += 50
+        if ela_score > 60: risk_score += 30
+        if copy_score > 40: risk_score += 20
         
-        # Clamp to 0-100
-        overall_risk = max(0, min(100, overall_risk))
+        if risk_score >= 70: risk = "HIGH"
+        elif risk_score >= 40: risk = "MEDIUM"
         
-        # 5. Determine Risk Level
-        if overall_risk >= 70:
-            risk_level = "HIGH"
-        elif overall_risk >= 40:
-            risk_level = "MEDIUM"
-        else:
-            risk_level = "LOW"
+        proc_time = (datetime.now() - start_time).total_seconds()
         
-        # 6. Prepare Analysis Data
-        analysis_data = {
-            "filename": file.filename,
-            "is_fake": is_fake,
-            "cnn_confidence": round(cnn_confidence, 2),
+        # 5. Save to DB using database.py
+        data = {
+            "filename": file.filename, "file_path": file_path, "is_fake": is_fake,
+            "cnn_confidence": round(cnn_conf, 2), 
             "ela_score": round(ela_score, 2),
-            "metadata_score": round(metadata_score, 2),
-            "copy_move_score": round(copy_move_score, 2),
-            "risk_level": risk_level,
-            "report_path": "",
-            "file_path": file_path
+            "metadata_score": round(meta_score, 2), 
+            "copy_move_score": round(copy_score, 2),
+            "risk_level": risk,
+            **enhanced_scores
         }
         
-        # 7. Save to Database
-        analysis_id = log_analysis(analysis_data)
+        analysis_id = database.log_analysis(data)
         print(f"💾 Saved to DB with ID: {analysis_id}")
         
-        # 8. Generate Report
-        report_path = generate_report(analysis_data, analysis_id)
-        analysis_data["report_path"] = report_path
-        
-        # 9. Prepare Response
-        response_data = {
+        # 6. Report Generation
+        report_url = None
+        if REPORT_GEN_AVAILABLE:
+            try:
+                gen = TruthLensReportGenerator(REPORTS_DIR)
+                # Prepare data for report generator
+                data["id"] = analysis_id
+                data["analysis_id"] = f"report_{analysis_id}_{file_timestamp}"
+                data["timestamp"] = datetime.now().isoformat()
+                
+                reports = gen.generate_backend_report(data, "html")
+                if "html" in reports:
+                    report_path = reports["html"]
+                    report_filename = os.path.basename(report_path)
+                    report_url = f"/reports/{report_filename}"
+            except Exception as e:
+                print(f"⚠️ Report generation error: {e}")
+
+        # 7. Check for ELA image (standard location)
+        ela_img_url = None
+        ela_name = f"ela_{filename}"
+        if os.path.exists(os.path.join(ELA_DIR, ela_name)):
+            ela_img_url = f"/uploads/ela_samples/{ela_name}"
+
+        return {
             "status": "success",
             "id": analysis_id,
-            "result": analysis_data,
-            "ela_image_url": f"/uploads/ela_samples/ela_{filename}" if os.path.exists(f"{ELA_DIR}/ela_{filename}") else None,
-            "report_url": f"/reports/{os.path.basename(report_path)}" if report_path else None
+            "result": {
+                **data,
+                "report_path": report_url or "",
+                "processing_time": round(proc_time, 2)
+            },
+            "ela_image_url": ela_img_url,
+            "ela_overlay_url": data.get("ela_overlay_url"),
+            "copy_move_visual_url": data.get("copy_move_visual_url"),
+            "report_url": report_url,
+            "processing_time": round(proc_time, 2)
         }
-        
-        return JSONResponse(content=response_data)
-        
-    except Exception as e:
-        print(f"❌ Analysis error: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
-# ---------- CNN Only Analysis ----------
-@app.post("/api/analyze/cnn", tags=["Analysis"], summary="CNN-Only Analysis", description="Runs only the CNN deepfake detection model")
+    except Exception as e:
+        print(f"❌ Complete Analysis Error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ---------- CNN Only Endpoint ----------
+@app.post("/api/analyze/cnn")
 async def analyze_cnn_only(file: UploadFile = File(...)):
-    """CNN-only analysis endpoint"""
+    validate_file(file)
     try:
-        # Save file temporarily
         file_id = str(uuid.uuid4())
-        temp_path = os.path.join(UPLOAD_DIR, f"temp_{file_id}.jpg")
-        
+        temp_path = os.path.join(UPLOAD_DIR, f"temp_{file_id}_{file.filename}")
         with open(temp_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
+            buffer.write(await file.read())
+            
+        prediction = "UNKNOWN"
+        confidence = 0.0
+        is_fake = False
         
-        # Get CNN prediction
         if CNN_AVAILABLE:
             prediction, confidence = predict_image(temp_path)
-            is_fake = prediction == "FAKE"
+            is_fake = (prediction == "FAKE")
         else:
-            # Dummy data
-            prediction = "FAKE"
-            confidence = 85.0
-            is_fake = True
+            prediction = "FAKE"; confidence = 85.0; is_fake = True
+            
+        if os.path.exists(temp_path): os.remove(temp_path)
         
-        # Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
-        return {
-            "prediction": prediction,
-            "confidence": confidence,
-            "is_fake": is_fake
-        }
-        
+        return {"prediction": prediction, "confidence": confidence, "is_fake": is_fake}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
-# ---------- Forensics Only Analysis ----------
-@app.post("/api/analyze/forensics", tags=["Analysis"], summary="Forensics-Only Analysis", description="Runs only the forensic analysis (ELA, metadata, copy-move).")
+# ---------- Forensics Only Endpoint ----------
+@app.post("/api/analyze/forensics")
 async def analyze_forensics_only(file: UploadFile = File(...)):
-    """Forensics-only analysis endpoint"""
+    validate_file(file)
     try:
-        # Save file temporarily
         file_id = str(uuid.uuid4())
-        temp_path = os.path.join(UPLOAD_DIR, f"temp_{file_id}.jpg")
-        
+        temp_path = os.path.join(UPLOAD_DIR, f"temp_{file_id}_{file.filename}")
         with open(temp_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
-        
-        # Get forensic analysis
+            buffer.write(await file.read())
+            
+        ela, meta, copy = 0, 0, 0
         if FORENSICS_AVAILABLE:
-            results = run_full_forensic_analysis(temp_path)
-            ela_score = results.get("ela_score", 0.0)
-            metadata_score = results.get("metadata_score", 0.0)
-            copy_move_score = results.get("copy_move_score", 0.0)
+            res = run_full_forensic_analysis(temp_path)
+            ela = res.get('ela_score', 0)
+            meta = res.get('metadata_score', 0)
+            copy = res.get('copy_move_score', 0)
         else:
-            # Dummy data
-            ela_score = 65.0
-            metadata_score = 40.0
-            copy_move_score = 20.0
+            ela, meta, copy = 65.0, 40.0, 20.0
+            
+        if os.path.exists(temp_path): os.remove(temp_path)
         
-        # Cleanup
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-        
-        forensic_avg = (ela_score + metadata_score + copy_move_score) / 3.0
-        
-        return {
-            "ela_score": ela_score,
-            "metadata_score": metadata_score,
-            "copy_move_score": copy_move_score,
-            "forensic_average": round(forensic_avg, 2)
-        }
-        
+        return {"ela_score": ela, "metadata_score": meta, "copy_move_score": copy}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
-# ---------- History Endpoint ----------
-@app.get("/api/history", tags=["History"], summary="Get analysis History", description="Returns recent analysis records from the database.")
-async def fetch_history(limit: int = 20):
-    """Get analysis history"""
-    try:
-        history = get_history(limit)
-        return {"history": history, "count": len(history)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ---------- Report Generation ----------
-def generate_report(analysis_data, analysis_id):
-    """Generate a simple text report"""
-    try:
-        report_filename = f"report_{analysis_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        report_path = os.path.join(REPORTS_DIR, report_filename)
-        
-        with open(report_path, 'w', encoding='utf-8') as f:
-            f.write("=" * 60 + "\n")
-            f.write("TRUTHLENS ANALYSIS REPORT\n")
-            f.write("=" * 60 + "\n\n")
-            
-            f.write(f"Report ID: {analysis_id}\n")
-            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Filename: {analysis_data['filename']}\n\n")
-            
-            f.write("-" * 40 + "\n")
-            f.write("ANALYSIS RESULTS\n")
-            f.write("-" * 40 + "\n")
-            
-            f.write(f"Risk Level: {analysis_data['risk_level']}\n")
-            f.write(f"CNN Prediction: {'FAKE' if analysis_data['is_fake'] else 'REAL'}\n")
-            f.write(f"CNN Confidence: {analysis_data['cnn_confidence']}%\n\n")
-            
-            f.write("Forensic Analysis:\n")
-            f.write(f"  • ELA Score: {analysis_data['ela_score']}%\n")
-            f.write(f"  • Metadata Score: {analysis_data['metadata_score']}%\n")
-            f.write(f"  • Copy-Move Score: {analysis_data['copy_move_score']}%\n\n")
-            
-            f.write("-" * 40 + "\n")
-            f.write("INTERPRETATION\n")
-            f.write("-" * 40 + "\n")
-            
-            if analysis_data['risk_level'] == "HIGH":
-                f.write("⚠️  HIGH RISK: Significant evidence of manipulation detected.\n")
-                f.write("   Recommendations:\n")
-                f.write("   - Verify image source\n")
-                f.write("   - Do not use for authentication\n")
-                f.write("   - Consider expert verification\n")
-            elif analysis_data['risk_level'] == "MEDIUM":
-                f.write("⚠️  MEDIUM RISK: Some suspicious indicators found.\n")
-                f.write("   Recommendations:\n")
-                f.write("   - Check image context\n")
-                f.write("   - Cross-reference with other sources\n")
-                f.write("   - Use with caution\n")
-            else:
-                f.write("✅ LOW RISK: Minimal evidence of manipulation.\n")
-                f.write("   Recommendations:\n")
-                f.write("   - Standard verification sufficient\n")
-                f.write("   - Maintain digital security practices\n")
-            
-            f.write("\n" + "=" * 60 + "\n")
-            f.write("End of Report\n")
-            f.write("=" * 60 + "\n")
-        
-        print(f"📄 Report generated: {report_path}")
-        return report_path
-        
-    except Exception as e:
-        print(f"⚠️  Report generation failed: {e}")
-        return ""
-
-# ---------- Run Server ----------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
